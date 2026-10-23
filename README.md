@@ -271,7 +271,13 @@ www-data@php2shell-lab:/var/www/html$
 | `--cmd COMMAND` | Exploit | Initial command to execute (default: `id; whoami; uname -a`) |
 | `--webshell-name NAME` | Exploit | Custom filename for dropped webshell (default: `p2s_shell.php`) |
 | `--exploit-method` | Exploit | Method selection: `auto` (default), `binary` (52704), or `upload` |
-| `--exploit-profile` | Exploit | Target build profile: `bookworm` (default) or `lab` |
+| `--exploit-profile` | Exploit | Target build profile: `bookworm` (default), `trixie` / `debian13`, or `lab` |
+| `--stage1-n N` | Exploit | Custom Stage 1 multipart count for precision calibration |
+| `--stage2-t N` | Exploit | Custom Stage 2 target bucket index |
+| `--stage2-v N` | Exploit | Custom Stage 2 value allocation size |
+| `--auto-calibrate` | Exploit | Automatically sweep calibration window if Stage 1 heap leak fails (default: enabled) |
+| `--pin-worker` | Exploit | Enable HTTP/1.1 persistent connection worker pinning (default: enabled) |
+| `--elf, --libphp PATH` | Exploit | Auto-extract `zif_system` and `zval_ptr_dtor` symbol offsets from `libphp.so` or `php` ELF binary |
 | `--zif-offset OFFSET` | Exploit | Custom hexadecimal offset for `zif_system` in `libphp.so` |
 | `--dtor-offset OFFSET` | Exploit | Custom hexadecimal offset for `zval_ptr_dtor` |
 | `--htdata-offset OFFSET` | Exploit | Custom offset for the 167-byte fake HashTable carrier |

