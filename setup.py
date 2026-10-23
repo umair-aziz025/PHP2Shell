@@ -9,7 +9,7 @@ HERE = Path(__file__).resolve().parent
 
 setup(
     name="php2shell-scanner",
-    version="2.1.0",
+    version="2.2.1",
     description=(
         "Full-pipeline PHP vulnerability assessment & exploitation suite for "
         "CVE-2026-109618 and CVE-2026-109619."
