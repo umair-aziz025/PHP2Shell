@@ -22,15 +22,14 @@ setup(
     license="MIT",
     python_requires=">=3.9",
     packages=find_packages(),
-    py_modules=["php2shell_unified"],
+    py_modules=["php2shell"],
     install_requires=[
         "requests>=2.28.0",
         "colorama>=0.4.6",
     ],
     entry_points={
         "console_scripts": [
-            "php2shell=php2shell_unified:main",
-            "php2shell-scanner=php2shell_unified:main",
+            "php2shell=php2shell:main",
         ],
     },
     classifiers=[

