@@ -1694,7 +1694,7 @@ def build_cli() -> argparse.ArgumentParser:
 
     # Pipeline triggers
     p.add_argument("--all", "--full", action="store_true", dest="run_all",
-                   help="Run recon, passive fingerprinting, active probes and WAF diagnostics (no exploitation)")
+                   help="Run the complete end-to-end pipeline (Recon -> Passive -> Probes -> WAF -> Exploit)")
     p.add_argument("--recon", action="store_true", help="Run Stage 1: Reconnaissance")
     p.add_argument("-w", "--wordlist", help="Custom wordlist file with endpoint paths (one per line)")
     p.add_argument("--remote-wordlist", "--fetch-wordlist", action="store_true", dest="fetch_wordlist",
@@ -1763,8 +1763,7 @@ def main() -> int:
     do_recon = args.run_all or args.recon or bool(args.wordlist) or args.fetch_wordlist
     do_active = args.run_all or args.active
     do_waf = args.run_all or args.waf
-    # --all is an assessment shortcut, not implicit permission to execute code.
-    do_exploit = args.exploit or args.shell or bool(args.lhost) or args.reverse
+    do_exploit = args.run_all or args.exploit or args.shell or bool(args.lhost) or args.reverse
     do_shell = args.shell
 
     # Load and merge endpoint wordlist (built-in + optional remote SecLists + user file)

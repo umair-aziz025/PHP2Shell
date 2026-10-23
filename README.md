@@ -50,7 +50,7 @@ PHP2Shell provides discovery, differential analysis, and weaponized verification
 
 - ⚡ **All-In-One Unified Engine (`php2shell.py`)**:
   - Single executable script combining the entire kill-chain with zero duplicate logic.
-  - Runs selected assessment stages with endpoint fallback. Exploitation is not implicit in `--all`.
+  - Continuous execution: probes all discovered endpoints and continues through all 5 stages end-to-end (`--all`).
   - Single-request optimization: Version and runtime metadata are collected together in a single passive response where possible, with endpoint fallback.
   - Real-time timestamped progress reporting after each pipeline phase (`[1/5]` through `[5/5]` and `[Shell]`).
 - 🔍 **Enhanced Pre-Scan Reconnaissance**:
@@ -173,7 +173,7 @@ python php2shell.py http://127.0.0.1:8899/ --all -v
 | `--timeout SECS` | Network | Request timeout in seconds (default: `10`) |
 | `-v, --verbose` | Logging | Enable detailed stage output and diagnostic logs |
 | `--json` | Output | Output structured JSON only (cannot be combined with `-o`, `--shell`, or reverse-listener options) |
-| `--all, --full` | Pipeline | Run recon, version review, active probes, and WAF diagnostics; **does not** invoke exploitation |
+| `--all, --full` | Pipeline | Run all 5 stages end-to-end (Recon → Passive → Probes → WAF → Exploit) |
 | `--recon` | Stage 1 | Run endpoint discovery, CMS detection, WAF identification |
 | `-w, --wordlist FILE` | Stage 1 | Path to custom endpoint wordlist file |
 | `--remote-wordlist` | Stage 1 | Download and merge latest GitHub SecLists PHP filenames wordlist |
