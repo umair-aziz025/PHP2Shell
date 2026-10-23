@@ -390,7 +390,7 @@ php -i | grep disable_functions
 php -v
 
 # Expected output (example for 8.3):
-# PHP 8.3.36 (cli) (built: Oct 15 2026 12:00:00) (NTS)
+# PHP 8.3.36 (cli) (build timestamp depends on the package; release announced Oct 21 2026) (NTS)
 
 # FPM version (may differ from CLI)
 php-fpm8.3 -v
@@ -421,7 +421,7 @@ curl -s http://localhost/version_check.php
 
 ```bash
 # Run the scanner from this toolkit
-python scanner/php2shell_scanner.py --target http://your-server.com
+python php2shell.py http://127.0.0.1:8080/ --json
 
 # Expected output for a patched server:
 # [✓] PHP 8.3.36 — NOT VULNERABLE
@@ -440,14 +440,10 @@ watch -n 5 "ps aux | grep php-fpm"
 ### 5. Verify WAF Rules
 
 ```bash
-# Test that oversized requests are blocked
-curl -s -o /dev/null -w "%{http_code}" \
-    -X POST \
-    -H "Content-Type: multipart/form-data; boundary=test" \
-    --data-binary @/dev/urandom \
-    http://your-server.com/index.php
-
-# Expected: 413 (Request Entity Too Large) or 403 (Forbidden)
+# Validate the documented request-size limit in an isolated test environment.
+# Use a finite test payload and inspect reverse-proxy/WAF logs for the result.
+# An HTTP 413 or 403 response is not guaranteed on every deployment.
+# Never stream /dev/urandom directly: it has no natural end-of-file.
 ```
 
 ---
