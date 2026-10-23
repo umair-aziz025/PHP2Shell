@@ -169,10 +169,10 @@ python php2shell.py http://127.0.0.1:8899/ --all -v
 | `targets` | Target | Target URL(s) or CIDR range (`192.168.1.0/24`) |
 | `-f, --file FILE` | Target | File containing target URLs (one per line) |
 | `-o, --output BASE` | Reporting | Base path for JSON and Markdown reports |
-| `-t, --threads N` | Performance | Concurrent scan worker threads (default: `10`) |
+| `-t, --threads N` | Performance | Deprecated compatibility flag; current target loop is sequential (value ignored) |
 | `--timeout SECS` | Network | Request timeout in seconds (default: `10`) |
 | `-v, --verbose` | Logging | Enable detailed stage output and diagnostic logs |
-| `--json` | Output | Output raw structured JSON to stdout |
+| `--json` | Output | Output structured JSON only (cannot be combined with `-o`, `--shell`, or reverse-listener options) |
 | `--all, --full` | Pipeline | Run recon, version review, active probes, and WAF diagnostics; **does not** invoke exploitation |
 | `--recon` | Stage 1 | Run endpoint discovery, CMS detection, WAF identification |
 | `-w, --wordlist FILE` | Stage 1 | Path to custom endpoint wordlist file |
@@ -266,3 +266,7 @@ The Exploit-DB #52704 implementation uses a fixed 167-byte allocation with a max
 A dispatched request does **not** establish code execution. Reports distinguish `unconfirmed` from verified success. When using `--proof-file`, supply a **local file path on the machine running the tool**; an unchanged, pre-existing file cannot serve as fresh proof. A remote filesystem path is not automatically readable locally unless explicitly shared or mounted. Requesting a reverse-shell callback is not proof that the connection was accepted.
 
 For vulnerability detection, version strings in HTTP response headers are hints only; web servers can conceal or forge them, and vendor backports may invalidate upstream-only version comparisons. Apache does not by itself demonstrate `mod_php`. The Python standalone fixture simulates headers, **not** memory corruption or RCE. Use a properly isolated native PHP lab for real functional validation.
+
+## Local regression tests
+
+Run `python -m unittest discover -s tests -v` after `pip install -r requirements.txt`. These checks cover version classification, header/SAPI inference, oversized command rejection, JSON output, evidence freshness, and relative documentation links; they do not send exploit traffic. The GitHub Actions **Offline validation** workflow is available by manual dispatch. On October 23, 2026, its initial multi-version run failed before executing steps, so passing CI status cannot currently be claimed.
