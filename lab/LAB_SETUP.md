@@ -8,6 +8,13 @@
 
 ## ⚠️ Safety Warning
 
+> **Lab scope:** The Docker Compose services contain genuine PHP/Apache runtimes of several versions, but their mounted test pages only provide basic version evidence. A version match alone cannot prove vulnerability or exploitability. The separate `standalone_lab.py` is a *Python simulator*, not a PHP runtime.
+>
+> **Network isolation:** The Docker bridge is now configured `internal: true` and ports are loopback-bound. Verify these safeguards independently; no lab environment is safe if bound or forwarded to the public internet.
+>
+> **Configuration:** Official PHP Docker images do **not** automatically interpret the `PHP_INI_MEMORY_LIMIT` environment variable. Inspect effective `php.ini` inside a container; do not assume the lab matches Exploit-DB's calibration requirements.
+
+
 > **This lab environment runs intentionally vulnerable PHP versions.** It is designed for security research, scanner validation, and educational purposes only. Follow all isolation recommendations carefully.
 
 ---
@@ -49,7 +56,7 @@ git --version             # Git 2.30+
 
 ## Architecture Overview
 
-The lab deploys five PHP-FPM containers, each running a different PHP version — four vulnerable and one patched for comparison:
+The lab deploys five PHP/Apache (mod_php) containers, each running a different PHP version — four vulnerable and one patched for comparison:
 
 ```
 ┌────────────────────────────────────────────────────────────┐
@@ -120,9 +127,9 @@ ss -tlnp | grep -E "808[2-6]"
 # Confirm Docker network is isolated
 docker network inspect php2shell-lab-net | grep -A5 "IPAM"
 
-# Confirm containers cannot reach the internet
-docker exec php83-vuln ping -c 1 8.8.8.8
-# Should fail (no external connectivity)
+# Confirm the Docker bridge is internal (without requiring ping inside a minimal image)
+docker network inspect php2shell-lab-net --format '{{.Internal}}'
+# Expected: true
 ```
 
 ---
@@ -131,8 +138,8 @@ docker exec php83-vuln ping -c 1 8.8.8.8
 
 ```bash
 # 1. Clone the repository (if you haven't already)
-git clone https://github.com/umair-aziz025/php2shell-research-toolkit.git
-cd php2shell-research-toolkit
+git clone https://github.com/umair-aziz025/PHP2Shell.git
+cd PHP2Shell
 
 # 2. Start the lab environment
 cd lab
@@ -144,9 +151,9 @@ docker compose ps
 # 4. Run the scanner against the lab
 cd ..
 pip install -r requirements.txt
-python scanner/php2shell_scanner.py --target http://127.0.0.1:8082
-python scanner/php2shell_scanner.py --target http://127.0.0.1:8083
-python scanner/php2shell_scanner.py --target http://127.0.0.1:8086  # patched — should pass
+python php2shell.py http://127.0.0.1:8082
+python php2shell.py http://127.0.0.1:8083
+python php2shell.py http://127.0.0.1:8086  # patched — should pass
 
 # 5. Tear down when finished
 cd lab
@@ -255,7 +262,7 @@ done
 
 ```bash
 # Scan a single vulnerable instance
-python scanner/php2shell_scanner.py --target http://127.0.0.1:8083
+python php2shell.py http://127.0.0.1:8083
 
 # Expected output:
 # ╔══════════════════════════════════════════════════════════╗
@@ -273,8 +280,8 @@ python scanner/php2shell_scanner.py --target http://127.0.0.1:8083
 
 ```bash
 # Scan all lab instances at once
-python scanner/php2shell_scanner.py \
-    --targets \
+python php2shell.py \
+    \
     http://127.0.0.1:8082 \
     http://127.0.0.1:8083 \
     http://127.0.0.1:8084 \
@@ -288,16 +295,16 @@ http://127.0.0.1:8084
 http://127.0.0.1:8085
 http://127.0.0.1:8086" > targets.txt
 
-python scanner/php2shell_scanner.py --file targets.txt
+python php2shell.py --file targets.txt
 ```
 
 ### Scan with JSON Output
 
 ```bash
 # Generate machine-readable output
-python scanner/php2shell_scanner.py \
-    --target http://127.0.0.1:8083 \
-    --output json \
+python php2shell.py \
+    http://127.0.0.1:8083 \
+    --json \
     > scan_results.json
 ```
 
@@ -305,11 +312,11 @@ python scanner/php2shell_scanner.py \
 
 ```bash
 # Scan the vulnerable instance
-python scanner/php2shell_scanner.py --target http://127.0.0.1:8083
+python php2shell.py http://127.0.0.1:8083
 # Result: VULNERABLE
 
 # Scan the patched instance
-python scanner/php2shell_scanner.py --target http://127.0.0.1:8086
+python php2shell.py http://127.0.0.1:8086
 # Result: NOT VULNERABLE
 
 # This comparison validates the scanner's accuracy
@@ -332,19 +339,16 @@ docker compose ps      # Should show nothing
 docker network ls      # php2shell-lab-net should be gone
 ```
 
-### Full Cleanup
+### Optional cleanup
+
+Stop only this lab's containers and volumes:
 
 ```bash
-# Remove all lab-related Docker images
-docker rmi $(docker images --filter "reference=php:8.*" -q) 2>/dev/null
-
-# Remove any dangling images
-docker image prune -f
-
-# Verify no lab artifacts remain
-docker ps -a | grep php2shell
-docker network ls | grep php2shell
+cd lab
+docker compose down -v
 ```
+
+Avoid deleting unrelated PHP images or project containers from your Docker host.
 
 ---
 
