@@ -3,7 +3,7 @@
 ## CVE-2026-109618 & CVE-2026-109619
 
 **Advisory ID:** PHP2SHELL-2026-001
-**Published:** 2026-10-15
+**Published:** 2026-10-22
 **Last Updated:** 2026-10-22
 **Severity:** Critical (CVSS 9.2)
 **Author:** umair-aziz025
@@ -14,7 +14,7 @@
 
 Two critical remote code execution (RCE) vulnerabilities have been identified in PHP's core request handling and memory management subsystems. These vulnerabilities, tracked as **CVE-2026-109618** and **CVE-2026-109619**, affect PHP versions 5.4 through unpatched releases of PHP 8.2, 8.3, 8.4, and 8.5.
 
-When chained together, these vulnerabilities allow an unauthenticated remote attacker to achieve arbitrary code execution on any server running a vulnerable PHP version behind PHP-FPM, mod_php, or CGI. The attack requires no authentication, no user interaction, and can be triggered with a single crafted HTTP request.
+When chained together, these vulnerabilities allow an unauthenticated remote attacker to achieve arbitrary code execution on any server running a vulnerable PHP version behind PHP-FPM, mod_php, or CGI. Authentication and user interaction are not required in confirmed cases. However, the demonstrated exploit paths can require multiple requests, worker reuse, specific PHP builds, and configuration; a universal single-request exploit should not be assumed.
 
 Both vulnerabilities stem from fundamental flaws in PHP's error recovery and global state management during request lifecycle transitions. The first vulnerability (CVE-2026-109618) creates an exploitable memory corruption condition through out-of-memory (OOM) error mishandling, while the second (CVE-2026-109619) leverages stale global state after `longjmp()`-based error recovery to produce a use-after-free primitive.
 
@@ -219,18 +219,12 @@ Traditional CGI mode spawns a new PHP process per request:
 
 | Date | Event |
 |---|---|
-| 2026-07-12 | Initial discovery of OOM-related crash in PHP-FPM error handling |
-| 2026-07-19 | Root cause analysis identifies uninitialized memory access in cleanup path |
-| 2026-07-28 | Discovery of stale global state condition leading to use-after-free |
-| 2026-08-02 | Both vulnerabilities reported to PHP Security Team via security@php.net |
-| 2026-08-05 | PHP Security Team acknowledges receipt; assigns internal tracking |
-| 2026-08-18 | PHP Security Team confirms both vulnerabilities; begins patch development |
-| 2026-09-10 | Preliminary patches provided for review |
-| 2026-09-22 | Patch review completed; release coordination begins |
-| 2026-10-10 | CVE-2026-109618 and CVE-2026-109619 assigned by MITRE |
-| 2026-10-15 | Coordinated public disclosure; patched PHP versions released |
-| 2026-10-15 | PHP 8.2.35, 8.3.36, 8.4.27, 8.5.12 released |
-| 2026-10-22 | This advisory published |
+| 2026-10-20 | PHP project announced an upcoming critical security release ([PHP mailing list](https://news-web.php.net/php.announce/start/494)) |
+| 2026-10-21 | PHP disclosed both CVEs and released corrected PHP 8.2.35, 8.3.36, 8.4.27 and 8.5.12 ([PHP official news](https://www.php.net/archive/2026.php)) |
+| 2026-10-22 | OffSec published its overview and Exploit-DB #52704 ([OffSec blog](https://www.offsec.com/blog/php2shell-critical-vulnerabilities-in-php-core/)) |
+| 2026-10-22 | This repository's technical advisory was published |
+
+Earlier private discovery, reporting, review, and release dates were omitted because the cited public sources do not substantiate those entries.
 
 ---
 
