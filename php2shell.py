@@ -1004,7 +1004,7 @@ class UnifiedPHP2Shell:
             base = target.rstrip("/")
             for pinfo in ["/phpinfo.php", "/info.php", "/php_info.php", "/test.php", "/test_info.php", "/i.php"]:
                 try:
-                    p_resp = self.session.get(f"{base}{pinfo}", timeout=self.timeout, allow_redirects=False)
+                    p_resp = self.session.get(urljoin(target, pinfo), timeout=self.timeout, allow_redirects=False)
                     if p_resp.status_code == 200:
                         m_p = re.search(r"PHP\s+Version\s*[:\s]*(\d+\.\d+\.\d+(?:-\w+)?)", p_resp.text, re.I)
                         if m_p:
@@ -1681,7 +1681,7 @@ def build_cli() -> argparse.ArgumentParser:
     p.add_argument("targets", nargs="*", help="Target URL(s) or CIDR range(s)")
     p.add_argument("-f", "--file", help="File with targets (one per line)")
     p.add_argument("-o", "--output", help="Base filename for .json and .md report")
-    p.add_argument("-t", "--threads", type=int, default=10, help="Concurrent scanner threads (default: 10)")
+    p.add_argument("-t", "--threads", type=int, default=10, help="Deprecated compatibility flag; scan currently runs sequentially")
     p.add_argument("--timeout", type=int, default=10, help="HTTP request timeout in seconds (default: 10)")
     p.add_argument("-v", "--verbose", action="store_true", help="Verbose step output")
     p.add_argument("--json", action="store_true", help="Output JSON only")
@@ -1722,6 +1722,9 @@ def build_cli() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_cli()
     args = parser.parse_args()
+
+    if args.json and (args.output or args.shell or args.reverse or args.lhost):
+        parser.error("--json cannot be combined with report-file or interactive shell options")
 
     # Target resolution
     targets: List[str] = []
@@ -1768,13 +1771,15 @@ def main() -> int:
     pipe = UnifiedPHP2Shell(timeout=args.timeout, verbose=args.verbose)
     all_results: List[dict] = []
 
-    print(f"{Fore.CYAN}[*] Starting Unified PHP2Shell run across {len(targets)} target(s)...{Style.RESET_ALL}")
-    print(f"{Fore.CYAN}[*] Active wordlist: {len(active_wordlist)} endpoint paths loaded.{Style.RESET_ALL}\n")
+    if not args.json:
+        print(f"{Fore.CYAN}[*] Starting Unified PHP2Shell run across {len(targets)} target(s)...{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}[*] Active wordlist: {len(active_wordlist)} endpoint paths loaded.{Style.RESET_ALL}\n")
 
     for target in targets:
-        print(f"{Fore.WHITE}======================================================================{Style.RESET_ALL}")
-        print(f"{Fore.CYAN}TARGET: {target}{Style.RESET_ALL}")
-        print(f"{Fore.WHITE}======================================================================{Style.RESET_ALL}")
+        if not args.json:
+            print(f"{Fore.WHITE}======================================================================{Style.RESET_ALL}")
+            print(f"{Fore.CYAN}TARGET: {target}{Style.RESET_ALL}")
+            print(f"{Fore.WHITE}======================================================================{Style.RESET_ALL}")
 
         t_res: dict = {"target": target}
         ep_to_use = target
@@ -1838,7 +1843,8 @@ def main() -> int:
                 pipe.launch_interactive_shell(er.webshell_url, DEFAULT_PARAM)
 
         all_results.append(t_res)
-        print()
+        if not args.json:
+            print()
 
     # Output Reports
     if args.output:
