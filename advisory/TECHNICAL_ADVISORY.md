@@ -4,7 +4,7 @@
 
 **Advisory ID:** PHP2SHELL-2026-001
 **Published:** 2026-10-22
-**Last Updated:** 2026-10-22
+**Last Updated:** 2026-10-23
 **Severity:** Critical (CVSS 9.2)
 **Author:** umair-aziz025
 
@@ -29,7 +29,7 @@ Both vulnerabilities stem from fundamental flaws in PHP's error recovery and glo
 | Field | Value |
 |---|---|
 | **CVE ID** | CVE-2026-109618 |
-| **CWE** | CWE-908: Use of Uninitialized Resource |
+| **CWE** | CWE-416 (Use After Free), CWE-755 (Improper Handling of Exceptional Conditions), CWE-824 (Access of Uninitialized Pointer) — as listed in the official advisory |
 | **CVSS v4.0** | 9.2 (Critical) |
 | **Attack Vector** | Network |
 | **Attack Complexity** | High |\n| **Attack Requirements** | Present |
