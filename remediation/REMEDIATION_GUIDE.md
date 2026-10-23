@@ -20,6 +20,11 @@
 
 ## Immediate Actions Checklist
 
+**Upstream facts:** The first fixed versions are PHP **8.2.35, 8.3.36, 8.4.27 and 8.5.12**. PHP also published minimal source backports for 7.4, 8.0 and 8.1; vendors may distribute fixes without changing the apparent upstream version. Always verify the actual **web-serving** runtime, not only `php -v`.
+
+[PHP CVE-2026-109618 advisory](https://github.com/php/php-src/security/advisories/GHSA-w8hw-w9fx-j79w) · [PHP CVE-2026-109619 advisory](https://github.com/php/php-src/security/advisories/GHSA-6wmf-4rv5-p3rp)
+
+
 > ⚠️ **These vulnerabilities are Critical (CVSS 9.2). Treat remediation as an emergency.**
 
 - [ ] **Identify all PHP installations** across your infrastructure (servers, containers, CI/CD runners, development machines)
@@ -242,6 +247,9 @@ kubectl exec <pod-name> -- php -v
 
 ### WAF Rules
 
+**Important:** The following example WAF rules are not comprehensive and **must not be treated as sufficient PHP2Shell protection**. Relying only on incoming `Content-Length` is bypassable by requests with missing or unusable lengths. Enforce bounds on *decoded* request sizes, nested input depth, multipart headers and part counts **before PHP parses them**. Consult your WAF vendor's syntax and test before deploying.
+
+
 #### ModSecurity / OWASP CRS
 
 ```apache
@@ -302,7 +310,7 @@ server {
 ```ini
 ; /etc/php/8.3/fpm/pool.d/www.conf
 
-; Recycle workers after N requests to clear stale state (mitigates CVE-2026-109619)
+; Worker recycling is not a validated complete mitigation for CVE-2026-109619
 pm.max_requests = 500
 
 ; Limit request processing time
@@ -326,8 +334,12 @@ php_admin_value[upload_max_filesize] = 10M
 ; =============================================================
 
 ; --- Memory Limits ---
-; Restrict memory to limit OOM exploitation surface (CVE-2026-109618)
-; Set to the minimum your application requires
+; AFTER PATCHING, apply resource limits appropriate to your app.
+; BEFORE PATCHING CVE-2026-109618, upstream guidance instead calls
+; for administrator-enforced memory_limit=-1, strict frontend request
+; controls and container memory safeguards. That is only temporary.
+; Merely lowering a finite PHP memory_limit can facilitate controlled OOM.
+; Do NOT copy this normal post-patch example as an emergency fix.
 memory_limit = 128M
 
 ; --- Request Size Limits ---
@@ -347,6 +359,7 @@ max_execution_time = 30
 max_input_time = 60
 
 ; --- Disable Dangerous Functions ---
+; Defense in depth only; NOT a PHP2Shell fix.
 ; Remove any functions your application does not need
 disable_functions = exec,passthru,shell_exec,system,proc_open,popen,parse_ini_file,show_source,pcntl_exec
 
@@ -358,6 +371,10 @@ log_errors = On
 error_log = /var/log/php/error.log
 
 ; --- Session Hardening ---
+; CVE-2026-109619 partial reductions pending patch (not full fixes):
+; session.upload_progress.enabled = 0
+; PHP 8.5: fatal_error_backtraces = 0
+; Enforce before PHP request parsing and restart all workers.
 session.cookie_httponly = On
 session.cookie_secure = On
 session.use_strict_mode = On
