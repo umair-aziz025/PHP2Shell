@@ -1,4 +1,4 @@
-# 🔬 PHP2Shell — Research & Exploitation Toolkit (v2.2.0)
+# 🔬 PHP2Shell — Research & Exploitation Toolkit (v2.2.1)
 
 > [!CAUTION]
 > ### ⚠️ LEGAL & ETHICAL DISCLAIMER — AUTHORIZED LABORATORY TESTING ONLY
@@ -16,7 +16,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/PYTHON-3.9+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python">
-  <a href="php2shell.py"><img src="https://img.shields.io/badge/TOOLKIT-V2.2.0-2ecc71?style=for-the-badge" alt="Toolkit"></a>
+  <a href="php2shell.py"><img src="https://img.shields.io/badge/TOOLKIT-V2.2.1-2ecc71?style=for-the-badge" alt="Toolkit"></a>
 </p>
 
 <p align="center">
@@ -237,6 +237,7 @@ PHP2Shell/
 
 The techniques and detection logic in this toolkit have been validated against vendor advisories and research publications:
 
+- **OffSec research overview**: [PHP2Shell — Critical Vulnerabilities in PHP Core](https://www.offsec.com/blog/php2shell-critical-vulnerabilities-in-php-core/) (October 22, 2026)
 - **Exploit-DB #52704**: [php2shell - one-click remote exploit for PHP 8.4.26 / mod_php, prefork](https://www.exploit-db.com/exploits/52704) (9bie & Exploit-DB)
 - **PHP Project Advisories**:
   - [GHSA-w8hw-w9fx-j79w](https://github.com/php/php-src/security/advisories/GHSA-w8hw-w9fx-j79w) (CVE-2026-109618 — OOM corruption)
@@ -257,3 +258,11 @@ The techniques and detection logic in this toolkit have been validated against v
 - **Command size:** The 14-byte ceiling in the original PoC is specific to its constructed 167-byte `zend_string` layout, not a generic PHP shell command limit. The example short trigger presupposes a separate file already exists on the target; it is not self-contained.
 - **Safety and error handling:** Prefer explicit `unknown` or `not verified` results where evidence is insufficient. Restrict testing to disposable, authorized lab systems, and avoid treating timeouts or HTTP 500 responses alone as proof of vulnerability.
 - **Reference review (October 23, 2026):** The upstream PHP security advisories, OffSec write-up, Calif research, Datadog, Wiz, CrowdStrike, and Exploit-DB pages are accessible. Their reporting validates the vulnerability family, **not** this repository's claimed end-to-end functionality.
+
+### Result verification and command handling
+
+The Exploit-DB #52704 implementation uses a fixed 167-byte allocation with a maximum 14-byte Latin-1 command carrier. The limit applies to **encoded bytes**, not Python characters. Commands exceeding the limit are rejected with an explicit error; the tool does not silently replace the requested command or stage an alternate one.
+
+A dispatched request does **not** establish code execution. Reports distinguish `unconfirmed` from verified success. When using `--proof-file`, supply a **local file path on the machine running the tool**; an unchanged, pre-existing file cannot serve as fresh proof. A remote filesystem path is not automatically readable locally unless explicitly shared or mounted. Requesting a reverse-shell callback is not proof that the connection was accepted.
+
+For vulnerability detection, version strings in HTTP response headers are hints only; web servers can conceal or forge them, and vendor backports may invalidate upstream-only version comparisons. Apache does not by itself demonstrate `mod_php`. The Python standalone fixture simulates headers, **not** memory corruption or RCE. Use a properly isolated native PHP lab for real functional validation.
