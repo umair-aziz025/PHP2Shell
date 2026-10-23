@@ -21,7 +21,7 @@
 
 <p align="center">
   <strong>Comprehensive research, defensive auditing, and unified exploitation suite for CVE-2026-109618 & CVE-2026-109619 — critical PHP core vulnerabilities.</strong><br>
-  <em>Features an all-in-one script (<code>php2shell.py</code>) delivering an end-to-end pipeline: Recon → Passive Fingerprinting → Behavioral Probing → WAF Evasion → Weaponized Exploitation → Interactive Shell / Reverse Listener.</em>
+  <em>Features an all-in-one script (<code>php2shell.py</code>) with assessment phases (Recon → Passive Fingerprinting → Behavioral Probing → WAF Diagnostics) and separately opt-in exploit/shell functions.</em>
 </p>
 
 ---
@@ -37,7 +37,7 @@ PHP2Shell provides discovery, differential analysis, and weaponized verification
 
 ### ⛓️ Exploitation Chain Summary
 1. **RFC 1867 OOM Bailout**: Deeply nested multipart arrays induce a memory allocation error triggering `zend_bailout()`, bypassing standard request cleanup.
-2. **Worker State Poisoning (UAF)**: Persistent HTTP/1.1 Keep-Alive connections reuse the same worker process (`mod_php` or `PHP-FPM`), causing the subsequent request to dereference uninitialized or freed memory.
+2. **Worker State Poisoning (UAF)**: Some PHP request handlers reuse workers, allowing request-owned state to survive into a later request under vulnerable conditions. HTTP Keep-Alive alone does not guarantee two requests reach the same PHP worker.
 3. **Exploit-DB #52704 Chain**:
    - **Stage 0**: HTTP worker rotation (aborting current worker so prefork forks a clean child).
    - **Stage 1**: `Set-Cookie` heap leak yielding the Zend MM 2MB chunk base.
@@ -50,8 +50,8 @@ PHP2Shell provides discovery, differential analysis, and weaponized verification
 
 - ⚡ **All-In-One Unified Engine (`php2shell.py`)**:
   - Single executable script combining the entire kill-chain with zero duplicate logic.
-  - Continuous execution: probes all discovered endpoints and continues through all stages without stopping mid-session.
-  - Single-request optimization: `VersionChecker` and `HeaderAnalyzer` share one initial cached HTTP response with endpoint fallback.
+  - Runs selected assessment stages with endpoint fallback. Exploitation is not implicit in `--all`.
+  - Single-request optimization: Version and runtime metadata are collected together in a single passive response where possible, with endpoint fallback.
   - Real-time timestamped progress reporting after each pipeline phase (`[1/5]` through `[5/5]` and `[Shell]`).
 - 🔍 **Enhanced Pre-Scan Reconnaissance**:
   - Comprehensive built-in wordlist (120+ PHP paths covering uploads, CMSs, administration, database managers, and APIs).
@@ -106,7 +106,7 @@ pip install -r requirements.txt
 
 The primary script ([`php2shell.py`](php2shell.py)) handles all tasks in one single file:
 
-### 🚀 1. Full Pipeline Execution (Recon → Passive → Probes → WAF → Exploit)
+### 🚀 1. Full Assessment (Recon → Passive → Probes → WAF; no exploit)
 ```bash
 python php2shell.py http://127.0.0.1:8899/ --all -v
 ```
@@ -173,7 +173,7 @@ python php2shell.py http://127.0.0.1:8899/ --all -v
 | `--timeout SECS` | Network | Request timeout in seconds (default: `10`) |
 | `-v, --verbose` | Logging | Enable detailed stage output and diagnostic logs |
 | `--json` | Output | Output raw structured JSON to stdout |
-| `--all, --full` | Pipeline | Run all 5 stages end-to-end (Recon → Passive → Probes → WAF → Exploit) |
+| `--all, --full` | Pipeline | Run recon, version review, active probes, and WAF diagnostics; **does not** invoke exploitation |
 | `--recon` | Stage 1 | Run endpoint discovery, CMS detection, WAF identification |
 | `-w, --wordlist FILE` | Stage 1 | Path to custom endpoint wordlist file |
 | `--remote-wordlist` | Stage 1 | Download and merge latest GitHub SecLists PHP filenames wordlist |
