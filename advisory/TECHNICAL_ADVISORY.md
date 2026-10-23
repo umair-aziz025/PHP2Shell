@@ -30,9 +30,9 @@ Both vulnerabilities stem from fundamental flaws in PHP's error recovery and glo
 |---|---|
 | **CVE ID** | CVE-2026-109618 |
 | **CWE** | CWE-908: Use of Uninitialized Resource |
-| **CVSS v3.1** | 9.2 (Critical) |
+| **CVSS v4.0** | 9.2 (Critical) |
 | **Attack Vector** | Network |
-| **Attack Complexity** | Low |
+| **Attack Complexity** | High |\n| **Attack Requirements** | Present |
 | **Privileges Required** | None |
 | **User Interaction** | None |
 
@@ -84,9 +84,9 @@ Successful exploitation of CVE-2026-109618 yields a **heap corruption primitive*
 |---|---|
 | **CVE ID** | CVE-2026-109619 |
 | **CWE** | CWE-416: Use After Free |
-| **CVSS v3.1** | 9.2 (Critical) |
+| **CVSS v4.0** | 9.2 (Critical) |
 | **Attack Vector** | Network |
-| **Attack Complexity** | Low |
+| **Attack Complexity** | High |\n| **Attack Requirements** | Present |
 | **Privileges Required** | None |
 | **User Interaction** | None |
 
@@ -130,23 +130,24 @@ When combined with the heap corruption from CVE-2026-109618, these primitives fo
 
 ---
 
-## CVSS v3.1 Score Breakdown
+## CVSS v4.0 Score Breakdown
 
-Both vulnerabilities share the same CVSS score:
+The **official** CVSS v4.0 base score for each advisory is **9.2 (Critical)**. Do not reuse the earlier CVSS v3.1 vector, which has different metrics and produced misleading results.
 
-| Metric | Value | Rationale |
-|---|---|---|
-| **Attack Vector (AV)** | Network (N) | Exploitable remotely via HTTP |
-| **Attack Complexity (AC)** | Low (L) | No special conditions; standard HTTP requests |
-| **Privileges Required (PR)** | None (N) | No authentication needed |
-| **User Interaction (UI)** | None (N) | No user action required |
-| **Scope (S)** | Changed (C) | Compromise of PHP worker can affect the host OS |
-| **Confidentiality (C)** | High (H) | Full memory read access |
-| **Integrity (I)** | High (H) | Arbitrary code execution |
-| **Availability (A)** | High (H) | Complete denial of service possible |
+| Metric | Official value |
+|---|---|
+| Attack Vector (AV) | Network (N) |
+| Attack Complexity (AC) | High (H) |
+| Attack Requirements (AT) | Present (P) |
+| Privileges Required (PR) | None (N) |
+| User Interaction (UI) | None (N) |
+| Vulnerable System Confidentiality / Integrity / Availability | High / High / High |
+| Subsequent System Confidentiality / Integrity / Availability | None / None / None |
 
-**CVSS Vector String:** `CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H`
-**Base Score: 9.2 (Critical)**
+**Official vector (both advisories):** `CVSS:4.0/AV:N/AC:H/AT:P/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N`.
+
+See the [OOM advisory](https://github.com/php/php-src/security/advisories/GHSA-w8hw-w9fx-j79w) and [stale-state advisory](https://github.com/php/php-src/security/advisories/GHSA-6wmf-4rv5-p3rp) for primary-source scoring.
+
 
 ---
 
@@ -175,40 +176,20 @@ Both vulnerabilities share the same CVSS score:
 
 ### PHP-FPM (FastCGI Process Manager)
 
-PHP-FPM is the **most exploitable** deployment model for these vulnerabilities:
-
-- **Worker process reuse** is fundamental to FPM's architecture, making CVE-2026-109619 trivially exploitable
-- The `pm = static` and `pm = dynamic` modes both reuse workers, with `static` being the most predictable
-- **Prefork model** means each worker handles requests sequentially — an attacker can poison and exploit the same worker reliably
-- Default configurations (`pm.max_children = 5`) create a small worker pool, increasing collision probability
-- **`pm.max_requests`** (if set) provides some mitigation by recycling workers, but default is `0` (unlimited)
-
-**Risk Level: Critical**
+PHP-FPM serves requests using reusable worker processes, so it is within the affected product scope. However, the upstream stale-state advisory distinguishes **conditional FPM exposure** from a universal default-configuration exploit. Confirmed session-lifecycle demonstrations required a suitable producer during application execution and an early session-upload-progress consumer. Do not equate worker reuse with guaranteed RCE.
 
 ### mod_php (Apache Module)
 
-mod_php runs PHP within the Apache worker/prefork process:
+The PHP project identifies Apache **mod_php as the highest-risk deployment** because an unauthenticated attack was demonstrated before application code ran. Applicability still depends on the PHP version, runtime build and exploit-specific memory layout. Do not infer mod_php simply from an `Apache` HTTP Server header: Apache also proxies to PHP-FPM.
 
-- Apache **prefork MPM** exhibits similar worker reuse patterns to PHP-FPM
-- Apache **worker/event MPMs** use threads, which changes the global state layout but does not eliminate the vulnerability (thread-safe builds use TSRM, which has its own stale-state issues)
-- The attack surface is **directly exposed** — no intermediary between the HTTP request and PHP processing
+### PHP-CGI and other SAPIs
 
-**Risk Level: Critical**
-
-### PHP-CGI
-
-Traditional CGI mode spawns a new PHP process per request:
-
-- CVE-2026-109619 is **not exploitable** under pure CGI, as each request gets a fresh process
-- CVE-2026-109618 remains exploitable for denial of service and potential memory corruption
-- FastCGI mode (php-cgi with `-b` flag) **is vulnerable** as it reuses processes
-
-**Risk Level: High (DoS) / Critical (FastCGI mode)**
+The PHP security announcement considers all PHP installations serving web requests in scope, including php-cgi, LiteSpeed and FrankenPHP. Specific producer/consumer chains differ by SAPI. Pure CGI not retaining worker state does not by itself establish immunity to all reported corruption paths, and a conditional FPM demonstration should not be generalized to CGI. Inventory and patch all serving runtimes rather than treating a SAPI as a fix.
 
 ### CLI / CLI-Server
 
 - PHP CLI scripts are typically not exposed to untrusted input via the same attack vector
-- The built-in development server (`php -S`) uses a single-process model and **is vulnerable** if exposed to untrusted network traffic
+- Do not expose the built-in development server (`php -S`) to untrusted network traffic; assess its PHP version and configuration separately
 - Not typically a production concern but relevant for development environments
 
 **Risk Level: Low (CLI) / High (CLI-Server if exposed)**
@@ -233,6 +214,10 @@ Earlier private discovery, reporting, review, and release dates were omitted bec
 - **CVE Records:**
   - [CVE-2026-109618 — MITRE](https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-109618)
   - [CVE-2026-109619 — MITRE](https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-109619)
+
+- **Primary security advisories:**
+  - [CVE-2026-109618: OOM corruption](https://github.com/php/php-src/security/advisories/GHSA-w8hw-w9fx-j79w)
+  - [CVE-2026-109619: Stale global state](https://github.com/php/php-src/security/advisories/GHSA-6wmf-4rv5-p3rp)
 
 - **PHP Security Advisories:**
   - [PHP Changelog — 8.2.35](https://www.php.net/ChangeLog-8.php#8.2.35)
