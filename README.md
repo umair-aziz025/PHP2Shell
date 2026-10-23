@@ -150,7 +150,7 @@ python php2shell.py -f targets.txt --threads 20 --recon --active --waf -o audit_
 
 ## 🧪 Testing with the Standalone Lab (No Docker Needed)
 
-You can test the entire pipeline locally without installing Docker or a native PHP binary:
+You can exercise the scanner's HTTP-handling, reporting, and control flow locally without installing Docker or a native PHP binary. **This standalone server is a simulated fixture, not a vulnerable PHP runtime; it cannot demonstrate a real PHP use-after-free, prove remote code execution, or validate exploit reliability.**
 
 ```bash
 # 1. Start the standalone lab server in background (simulating PHP 8.4.26 mod_php)
@@ -239,11 +239,21 @@ The techniques and detection logic in this toolkit have been validated against v
 
 - **Exploit-DB #52704**: [php2shell - one-click remote exploit for PHP 8.4.26 / mod_php, prefork](https://www.exploit-db.com/exploits/52704) (9bie & Exploit-DB)
 - **PHP Project Advisories**:
-  - [GHSA-6wmf-4rv5-p3rp](https://github.com/php/php-src/security/advisories/GHSA-6wmf-4rv5-p3rp) (CVE-2026-109618 RFC 1867 OOM Bailout)
-  - [GHSA-w8hw-w9fx-j79w](https://github.com/php/php-src/security/advisories/GHSA-w8hw-w9fx-j79w) (CVE-2026-109619 Stale Global State UAF)
+  - [GHSA-w8hw-w9fx-j79w](https://github.com/php/php-src/security/advisories/GHSA-w8hw-w9fx-j79w) (CVE-2026-109618 — OOM corruption)
+  - [GHSA-6wmf-4rv5-p3rp](https://github.com/php/php-src/security/advisories/GHSA-6wmf-4rv5-p3rp) (CVE-2026-109619 — stale global state)
 - **Calif.io Deep Dive**: [PHP2Shell: Under the Hood of PHP Core Memory Corruption](https://calif.io/php2shell/#php-5-4-0-rce)
 - **Datadog Security Labs**: [PHP2Shell Critical Vulnerabilities in PHP](https://securitylabs.datadoghq.com/articles/php2shell-critical-vulnerabilities-in-php/)
 - **CrowdStrike Falcon**: [CrowdStrike Protects Customers from PHP RCE Zero-Days](https://www.crowdstrike.com/en-us/blog/crowdstrike-protects-customers-from-php-rce-zero-days/)
 - **Wiz.io Threat Intel**: [PHP2Shell Cloud Threat Analysis](https://www.wiz.io/blog/php2shell-php-rce)
 
 
+
+
+## Validation scope and reliability notes
+
+- **Version evidence is not proof of exploitability.** Headers such as `X-Powered-By` can be hidden or falsified; confirm versions through an authenticated system inventory before reporting a host as affected.
+- **No-Docker lab limitations:** `lab/standalone_lab.py` is an HTTP simulation and does not execute PHP or reproduce memory corruption. A successful fixture response should be classified as a scanner integration check, not an exploit result.
+- **Exploit-DB portability:** EDB-52704 documents a build-specific proof of concept with assumptions about PHP, Apache, worker lifecycle, PHP configuration, and binary offsets. Do not represent it as universally reliable across affected versions or SAPIs.
+- **Command size:** The 14-byte ceiling in the original PoC is specific to its constructed 167-byte `zend_string` layout, not a generic PHP shell command limit. The example short trigger presupposes a separate file already exists on the target; it is not self-contained.
+- **Safety and error handling:** Prefer explicit `unknown` or `not verified` results where evidence is insufficient. Restrict testing to disposable, authorized lab systems, and avoid treating timeouts or HTTP 500 responses alone as proof of vulnerability.
+- **Reference review (October 23, 2026):** The upstream PHP security advisories, OffSec write-up, Calif research, Datadog, Wiz, CrowdStrike, and Exploit-DB pages are accessible. Their reporting validates the vulnerability family, **not** this repository's claimed end-to-end functionality.
