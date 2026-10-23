@@ -1,13 +1,5 @@
 # 🔬 PHP2Shell — Research & Exploitation Toolkit (v2.2.1)
 
-> [!CAUTION]
-> ### ⚠️ LEGAL & ETHICAL DISCLAIMER — AUTHORIZED LABORATORY TESTING ONLY
-> **This software is created strictly for authorized security research, vulnerability auditing, educational demonstration, and defensive hardening within isolated lab environments.**
-> 
-> Unauthorized testing, probing, or attacking of remote systems without explicit, prior written permission from the asset owners is illegal under national and international cybercrime legislation (including the US Computer Fraud and Abuse Act 18 U.S.C. § 1030, the UK Computer Misuse Act 1990, and equivalent statutes worldwide).
-> 
-> **The creators, contributors, and maintainers accept NO responsibility or liability** for any damage, service disruption, data loss, or legal consequences resulting from the misuse or deployment of this software. By cloning, downloading, viewing, or running this toolkit, you explicitly agree to use it exclusively on systems and networks you own or are legally authorized to test.
-
 <p align="center">
   <a href="https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-109618"><img src="https://img.shields.io/badge/CVE--2026--109618-CRITICAL%20(9.2)-e74c3c?style=for-the-badge" alt="CVE-2026-109618"></a>
   <a href="https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-109619"><img src="https://img.shields.io/badge/CVE--2026--109619-CRITICAL%20(9.2)-e74c3c?style=for-the-badge" alt="CVE-2026-109619"></a>
