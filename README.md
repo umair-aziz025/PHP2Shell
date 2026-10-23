@@ -275,8 +275,9 @@ www-data@php2shell-lab:/var/www/html$
 | `--stage1-n N` | Exploit | Custom Stage 1 multipart count for precision calibration |
 | `--stage2-t N` | Exploit | Custom Stage 2 target bucket index |
 | `--stage2-v N` | Exploit | Custom Stage 2 value allocation size |
-| `--auto-calibrate` | Exploit | Automatically sweep calibration window if Stage 1 heap leak fails (default: enabled) |
+| `--auto-calibrate` | Exploit | Sweep candidate Stage 1 allocation counts (`stage1_n`) if initial leak returns 0 (default: enabled) |
 | `--pin-worker` | Exploit | Enable HTTP/1.1 persistent connection worker pinning (default: enabled) |
+| `--force` | Exploit | Bypass preflight worker-pinning check and attempt binary exploitation anyway |
 | `--elf, --libphp PATH` | Exploit | Auto-extract `zif_system` and `zval_ptr_dtor` symbol offsets from `libphp.so` or `php` ELF binary |
 | `--zif-offset OFFSET` | Exploit | Custom hexadecimal offset for `zif_system` in `libphp.so` |
 | `--dtor-offset OFFSET` | Exploit | Custom hexadecimal offset for `zval_ptr_dtor` |

