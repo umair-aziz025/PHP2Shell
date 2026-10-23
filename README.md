@@ -193,6 +193,7 @@ python php2shell.py http://127.0.0.1:8899/ --all -v
 | `--proof-file PATH` | Exploit | Local file path to read and verify execution proof |
 | `--fetch PATH` | Exploit | Remote path to fetch via GET to verify execution proof |
 | `--huge-mb MB` | Exploit | Memory allocation in MB to trigger OOM (default: `12`) |
+| `--carrier-trigger CMD` | Exploit | Custom short trigger command for staged payload (default: `sh /tmp/php*`) |
 | `--lhost IP` | Reverse Shell | Listener IP address for reverse shell callback |
 | `--lport PORT` | Reverse Shell | Listener port for reverse shell callback (default: `4444`) |
 | `--reverse` | Reverse Shell | Trigger automatic reverse shell dispatch |
@@ -261,7 +262,7 @@ The techniques and detection logic in this toolkit have been validated against v
 
 ### Result verification and command handling
 
-The Exploit-DB #52704 implementation uses a fixed 167-byte allocation with a maximum 14-byte Latin-1 command carrier. The limit applies to **encoded bytes**, not Python characters. Commands exceeding the limit are rejected with an explicit error; the tool does not silently replace the requested command or stage an alternate one.
+The Exploit-DB #52704 implementation uses a 167-byte allocation with a 14-byte Latin-1 inline command carrier. Commands exceeding the 14-byte limit (such as reverse shells or chained commands) are automatically staged into `/tmp` via RFC 1867 multipart upload paired with an OOM bailout, and executed via a compact 12-byte carrier trigger (`sh /tmp/php*`, customizable with `--carrier-trigger`). Direct commands <= 14 bytes are executed directly without staging.
 
 A dispatched request does **not** establish code execution. Reports distinguish `unconfirmed` from verified success. When using `--proof-file`, supply a **local file path on the machine running the tool**; an unchanged, pre-existing file cannot serve as fresh proof. A remote filesystem path is not automatically readable locally unless explicitly shared or mounted. Requesting a reverse-shell callback is not proof that the connection was accepted.
 

