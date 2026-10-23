@@ -1,14 +1,16 @@
 <?php
 declare(strict_types=1);
 
-header('X-Powered-By: PHP/8.3.35');
+// Minimal synthetic version page. Never expose full phpinfo() in production.
+header('X-Powered-By: PHP/' . PHP_VERSION);
+header('Content-Type: text/html; charset=UTF-8');
 ?>
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><title>PHP Info Fixture</title></head>
+<head><meta charset="utf-8"><title>PHP Version Fixture</title></head>
 <body>
 <h1>PHP Version</h1>
-<p>8.3.35</p>
-<p>This is a static, non-sensitive fixture; it does not call phpinfo() or expose runtime configuration.</p>
+<p><?= htmlspecialchars(PHP_VERSION, ENT_QUOTES, 'UTF-8') ?></p>
+<p>This is a minimal version fixture; it does not expose phpinfo() configuration.</p>
 </body>
 </html>
