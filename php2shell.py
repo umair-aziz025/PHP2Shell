@@ -1720,9 +1720,14 @@ def write_reports(results: List[dict], out_base: str) -> None:
         ha = r["header_analysis"]
         pr = r.get("probe_result")
         er = r.get("exploit_result")
+        version = vr.get("version_string") or "Unknown"
+        sapi = ha.get("runtime_mode", "unknown")
+        status = vr.get("status", "unknown")
+        probe_outcome = pr.get("outcome", "N/A") if pr else "N/A"
+        exploit_status = er.get("status", "N/A") if er else "N/A"
         lines.append(
-            f"| {r['target']} | {vr.version_string or 'Unknown'} | {ha.runtime_mode.value} | "
-            f"{vr.status.value} | {pr.outcome.value if pr else 'N/A'} | {er.status.value if er else 'N/A'} |"
+            f"| {r['target']} | {version} | {sapi} | "
+            f"{status} | {probe_outcome} | {exploit_status} |"
         )
 
     with open(md_path, "w", encoding="utf-8") as f:
@@ -1938,4 +1943,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

