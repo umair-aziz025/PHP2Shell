@@ -17,7 +17,6 @@
 <p align="center">
   <img src="https://img.shields.io/badge/PYTHON-3.9+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python">
   <a href="php2shell.py"><img src="https://img.shields.io/badge/TOOLKIT-V2.2.0-2ecc71?style=for-the-badge" alt="Toolkit"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/LICENSE-MIT-3498db?style=for-the-badge" alt="License"></a>
 </p>
 
 <p align="center">
@@ -247,8 +246,4 @@ The techniques and detection logic in this toolkit have been validated against v
 - **CrowdStrike Falcon**: [CrowdStrike Protects Customers from PHP RCE Zero-Days](https://www.crowdstrike.com/en-us/blog/crowdstrike-protects-customers-from-php-rce-zero-days/)
 - **Wiz.io Threat Intel**: [PHP2Shell Cloud Threat Analysis](https://www.wiz.io/blog/php2shell-php-rce)
 
----
 
-## 📄 License
-
-This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
