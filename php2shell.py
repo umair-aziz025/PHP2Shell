@@ -1371,10 +1371,16 @@ class UnifiedPHP2Shell:
                             if fetch_path:
                                 st, body = raw_tgt.get(fetch_path)
                                 if st == 200 and body:
-                                    res.command_output = body.decode("latin1", errors="ignore").strip()
-                                    res.status = ExploitStatus.SUCCESS
-                                    res.details = f"Exploit-DB 52704 confirmed via {fetch_path}"
-                                    self.progress("  └─ [SUCCESS]:", f"Proof fetched: {res.command_output}", Fore.GREEN)
+                                    # An arbitrary HTTP 200 response cannot be bound
+                                    # to successful command execution. Never claim
+                                    # compromise from response status/content alone.
+                                    res.status = ExploitStatus.UNCONFIRMED
+                                    res.command_output = None
+                                    res.details = (
+                                        f"GET {fetch_path} returned HTTP 200, but the response "
+                                        "does not independently prove command execution."
+                                    )
+                                    self.progress("  └─ [Unconfirmed]:", res.details, Fore.YELLOW)
                                     return res
 
                             engine_52704.rotate()
