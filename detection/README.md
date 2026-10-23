@@ -330,4 +330,4 @@ snort -c /etc/snort/snort.lua -R snort/php2shell.rules -r test/pcaps/php2shell_o
 
 ## License
 
-BSD-3-Clause — See [LICENSE](../LICENSE) in the project root.
+The repository currently lacks a root license grant. The package metadata previously stated MIT while this section stated BSD-3-Clause; neither statement establishes third-party redistribution rights. Confirm licensing with the maintainer before reusing or redistributing these rules. See [responsible-use disclaimer](../DISCLAIMER.md).
