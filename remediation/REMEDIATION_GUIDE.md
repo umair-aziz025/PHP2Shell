@@ -242,6 +242,9 @@ kubectl exec <pod-name> -- php -v
 
 ### WAF Rules
 
+**Important:** These examples are defense-in-depth, not complete PHP2Shell mitigations. Checking `Content-Length` alone misses requests lacking a usable length. Enforce limits on **decoded** HTTP bodies, multipart parts and per-part headers at the frontend, before PHP processes them.
+
+
 #### ModSecurity / OWASP CRS
 
 ```apache
@@ -302,7 +305,7 @@ server {
 ```ini
 ; /etc/php/8.3/fpm/pool.d/www.conf
 
-; Recycle workers after N requests to clear stale state (mitigates CVE-2026-109619)
+; Worker recycling is not a complete mitigation for CVE-2026-109619
 pm.max_requests = 500
 
 ; Limit request processing time
@@ -326,8 +329,12 @@ php_admin_value[upload_max_filesize] = 10M
 ; =============================================================
 
 ; --- Memory Limits ---
-; Restrict memory to limit OOM exploitation surface (CVE-2026-109618)
-; Set to the minimum your application requires
+; AFTER PATCHING: choose normal application-specific resource limits.
+; BEFORE PATCHING CVE-2026-109618: upstream's temporary guidance is
+; administrator-enforced memory_limit=-1 plus strict frontend request
+; controls, container safeguards and worker restarts.
+; Lowering a finite PHP memory_limit is NOT a CVE fix and can help trigger OOM.
+; Do NOT copy this post-patch example as an emergency PHP2Shell mitigation.
 memory_limit = 128M
 
 ; --- Request Size Limits ---
@@ -347,6 +354,7 @@ max_execution_time = 30
 max_input_time = 60
 
 ; --- Disable Dangerous Functions ---
+; These restrictions are defense in depth, not a PHP2Shell fix.
 ; Remove any functions your application does not need
 disable_functions = exec,passthru,shell_exec,system,proc_open,popen,parse_ini_file,show_source,pcntl_exec
 
