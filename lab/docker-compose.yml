@@ -36,8 +36,8 @@ services:
       - "127.0.0.1:8082:80"        # Bind to localhost ONLY
     volumes:
       - ./app:/var/www/html:ro      # Mount test app as read-only
-    environment:
-      - PHP_INI_MEMORY_LIMIT=64M    # Low memory limit to demonstrate OOM behavior
+    # Official php:* Docker images do not apply PHP_INI_MEMORY_LIMIT automatically.
+    # Validate actual php.ini settings inside containers before drawing conclusions.
     restart: "no"                    # Do not auto-restart — lab use only
     networks:
       - php2shell-lab-net
@@ -59,8 +59,7 @@ services:
       - "127.0.0.1:8083:80"        # Bind to localhost ONLY
     volumes:
       - ./app:/var/www/html:ro      # Mount test app as read-only
-    environment:
-      - PHP_INI_MEMORY_LIMIT=64M
+    # PHP settings must be checked inside the running container.
     restart: "no"
     networks:
       - php2shell-lab-net
@@ -82,8 +81,7 @@ services:
       - "127.0.0.1:8084:80"        # Bind to localhost ONLY
     volumes:
       - ./app:/var/www/html:ro      # Mount test app as read-only
-    environment:
-      - PHP_INI_MEMORY_LIMIT=64M
+    # PHP settings must be checked inside the running container.
     restart: "no"
     networks:
       - php2shell-lab-net
@@ -105,8 +103,7 @@ services:
       - "127.0.0.1:8085:80"        # Bind to localhost ONLY
     volumes:
       - ./app:/var/www/html:ro      # Mount test app as read-only
-    environment:
-      - PHP_INI_MEMORY_LIMIT=64M
+    # PHP settings must be checked inside the running container.
     restart: "no"
     networks:
       - php2shell-lab-net
@@ -129,8 +126,7 @@ services:
       - "127.0.0.1:8086:80"        # Bind to localhost ONLY
     volumes:
       - ./app:/var/www/html:ro      # Mount test app as read-only
-    environment:
-      - PHP_INI_MEMORY_LIMIT=128M
+    # PHP settings must be checked inside the running container.
     restart: "no"
     networks:
       - php2shell-lab-net
@@ -151,7 +147,7 @@ networks:
     ipam:
       config:
         - subnet: 172.28.0.0/16    # Dedicated subnet for isolation
-    internal: false                  # Set to true to fully block internet access
+    internal: true                   # Block network egress from intentionally vulnerable lab containers
     labels:
       - "php2shell.purpose=research-lab"
       - "php2shell.warning=contains-vulnerable-software"
