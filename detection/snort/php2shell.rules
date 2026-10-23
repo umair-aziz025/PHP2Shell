@@ -1,0 +1,249 @@
+# =============================================================================
+# PHP2Shell Snort 3 Detection Rules
+# =============================================================================
+#
+# Purpose:  Detect exploitation attempts targeting CVE-2026-109618 (OOM →
+#           Uninitialized Memory Corruption) and CVE-2026-109619 (Use-After-
+#           Free via stale global state) in PHP request-handling code.
+#
+# Snort 3:  These rules use Snort 3 syntax (service-based matching, sticky
+#           buffers with http_* keywords).
+#
+# Deploy:   Add to your local.rules or a custom policy file:
+#             ips = { rules = 'path/to/php2shell.rules' }
+#           Reload with: snort --reload
+#
+# SID range: 9001001 – 9001099 (reserved for this ruleset)
+# Author:   PHP2Shell Research Project – Defensive Detection Team
+# Date:     2026-10-22
+# License:  BSD-3-Clause
+# =============================================================================
+
+
+# ---------------------------------------------------------------------------
+# 1. OOM-Triggering Requests — CVE-2026-109618
+#    Detect abnormally large Content-Length values (10+ digits → ≥ 1 GB).
+# ---------------------------------------------------------------------------
+
+alert http ( \
+    msg:"PHP2SHELL CVE-2026-109618 - Oversized Content-Length (potential OOM trigger)"; \
+    flow:to_server,established; \
+    http_header; content:"Content-Length|3A|"; \
+    pcre:"/Content-Length\s*:\s*[1-9]\d{9,}/Hi"; \
+    classtype:web-application-attack; \
+    reference:cve,2026-109618; \
+    metadata:service http, attack_target Server, severity High; \
+    gid:1; sid:9001001; rev:1; )
+
+# ---------------------------------------------------------------------------
+# 2. Deeply Nested Multipart Form Boundaries — CVE-2026-109618
+#    Four or more boundary= tokens in a single Content-Type header signals
+#    abusive multipart nesting designed to amplify memory allocation.
+# ---------------------------------------------------------------------------
+
+alert http ( \
+    msg:"PHP2SHELL CVE-2026-109618 - Deeply nested multipart boundaries (OOM amplification)"; \
+    flow:to_server,established; \
+    http_header; content:"multipart/form-data"; nocase; \
+    http_header; content:"boundary="; nocase; \
+    http_header; content:"boundary="; nocase; distance:1; \
+    http_header; content:"boundary="; nocase; distance:1; \
+    http_header; content:"boundary="; nocase; distance:1; \
+    classtype:web-application-attack; \
+    reference:cve,2026-109618; \
+    metadata:service http, attack_target Server, severity High; \
+    gid:1; sid:9001002; rev:1; )
+
+# ---------------------------------------------------------------------------
+# 3. Memory-Filling Padding in POST Body — CVE-2026-109618
+#    Large runs of repeated 0x41 bytes in POST data used to exhaust the PHP
+#    memory_limit allocation before triggering uninitialized memory access.
+# ---------------------------------------------------------------------------
+
+alert http ( \
+    msg:"PHP2SHELL CVE-2026-109618 - Repeated padding in POST body (memory exhaustion)"; \
+    flow:to_server,established; \
+    http_method; content:"POST"; \
+    http_client_body; content:"|41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41|"; depth:4096; \
+    isdataat:4096,relative; \
+    classtype:web-application-attack; \
+    reference:cve,2026-109618; \
+    metadata:service http, attack_target Server, severity Medium; \
+    gid:1; sid:9001003; rev:1; )
+
+# ---------------------------------------------------------------------------
+# 4. Rapid Sequential Requests — CVE-2026-109619 (Use-After-Free)
+#    Threshold detection: ≥ 10 POST requests from one source within 2 s.
+#    Indicates an attempt to re-use the same PHP-FPM worker for UAF.
+# ---------------------------------------------------------------------------
+
+alert http ( \
+    msg:"PHP2SHELL CVE-2026-109619 - Rapid sequential requests (UAF race condition)"; \
+    flow:to_server,established; \
+    http_method; content:"POST"; \
+    detection_filter:track by_src, count 10, seconds 2; \
+    classtype:web-application-attack; \
+    reference:cve,2026-109619; \
+    metadata:service http, attack_target Server, severity Critical; \
+    gid:1; sid:9001004; rev:1; )
+
+# ---------------------------------------------------------------------------
+# 5. Known Exploit User-Agent Strings — PHP2Shell Tool Signatures
+# ---------------------------------------------------------------------------
+
+alert http ( \
+    msg:"PHP2SHELL - Known exploit tool User-Agent (php2shell)"; \
+    flow:to_server,established; \
+    http_header; content:"User-Agent|3A|"; \
+    http_header; content:"php2shell"; nocase; distance:0; \
+    classtype:trojan-activity; \
+    reference:cve,2026-109618; \
+    reference:cve,2026-109619; \
+    metadata:service http, attack_target Server, severity High; \
+    gid:1; sid:9001005; rev:1; )
+
+alert http ( \
+    msg:"PHP2SHELL - Known exploit tool User-Agent (PHP-OOM-Exploit)"; \
+    flow:to_server,established; \
+    http_header; content:"User-Agent|3A|"; \
+    http_header; content:"PHP-OOM-Exploit"; nocase; distance:0; \
+    classtype:trojan-activity; \
+    reference:cve,2026-109618; \
+    metadata:service http, attack_target Server, severity High; \
+    gid:1; sid:9001006; rev:1; )
+
+alert http ( \
+    msg:"PHP2SHELL - Known exploit tool User-Agent (UAF-Trigger)"; \
+    flow:to_server,established; \
+    http_header; content:"User-Agent|3A|"; \
+    http_header; content:"UAF-Trigger"; nocase; distance:0; \
+    classtype:trojan-activity; \
+    reference:cve,2026-109619; \
+    metadata:service http, attack_target Server, severity High; \
+    gid:1; sid:9001007; rev:1; )
+
+alert http ( \
+    msg:"PHP2SHELL - Known exploit tool User-Agent (PhpSploit)"; \
+    flow:to_server,established; \
+    http_header; content:"User-Agent|3A|"; \
+    http_header; content:"PhpSploit"; nocase; distance:0; \
+    classtype:trojan-activity; \
+    reference:cve,2026-109618; \
+    reference:cve,2026-109619; \
+    metadata:service http, attack_target Server, severity High; \
+    gid:1; sid:9001008; rev:1; )
+
+# ---------------------------------------------------------------------------
+# 6. Abnormal PHP Error Responses — Exploitation Side-Effects
+# ---------------------------------------------------------------------------
+
+alert http ( \
+    msg:"PHP2SHELL - PHP fatal OOM error in response (possible exploitation)"; \
+    flow:to_client,established; \
+    http_server_body; content:"Fatal error"; nocase; \
+    http_server_body; content:"Allowed memory size"; nocase; distance:0; \
+    classtype:web-application-activity; \
+    reference:cve,2026-109618; \
+    metadata:service http, attack_target Server, severity High; \
+    gid:1; sid:9001010; rev:1; )
+
+alert http ( \
+    msg:"PHP2SHELL - zend_mm_heap corrupted in response (heap corruption indicator)"; \
+    flow:to_client,established; \
+    http_server_body; content:"zend_mm_heap corrupted"; nocase; \
+    classtype:web-application-activity; \
+    reference:cve,2026-109619; \
+    metadata:service http, attack_target Server, severity Critical; \
+    gid:1; sid:9001011; rev:1; )
+
+alert http ( \
+    msg:"PHP2SHELL - Double free or corruption in response (UAF indicator)"; \
+    flow:to_client,established; \
+    http_server_body; content:"double free or corruption"; nocase; \
+    classtype:web-application-activity; \
+    reference:cve,2026-109619; \
+    metadata:service http, attack_target Server, severity Critical; \
+    gid:1; sid:9001012; rev:1; )
+
+alert http ( \
+    msg:"PHP2SHELL - Segfault in PHP response (possible memory corruption)"; \
+    flow:to_client,established; \
+    http_stat_code; content:"500"; \
+    http_server_body; content:"Segmentation fault"; nocase; \
+    classtype:web-application-activity; \
+    reference:cve,2026-109619; \
+    metadata:service http, attack_target Server, severity Critical; \
+    gid:1; sid:9001013; rev:1; )
+
+# ---------------------------------------------------------------------------
+# 7. Shellcode Patterns in PHP Request Bodies
+# ---------------------------------------------------------------------------
+
+# NOP sled (32 consecutive 0x90 bytes)
+alert http ( \
+    msg:"PHP2SHELL - NOP sled in POST body (shellcode injection)"; \
+    flow:to_server,established; \
+    http_method; content:"POST"; \
+    http_client_body; content:"|90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90|"; \
+    classtype:shellcode-detect; \
+    reference:cve,2026-109618; \
+    reference:cve,2026-109619; \
+    metadata:service http, attack_target Server, severity Critical; \
+    gid:1; sid:9001020; rev:1; )
+
+# x86 shellcode prologue + syscall
+alert http ( \
+    msg:"PHP2SHELL - x86 shellcode prologue in POST body"; \
+    flow:to_server,established; \
+    http_method; content:"POST"; \
+    http_client_body; content:"|55 89 E5|"; \
+    http_client_body; content:"|CD 80|"; distance:0; \
+    classtype:shellcode-detect; \
+    reference:cve,2026-109618; \
+    reference:cve,2026-109619; \
+    metadata:service http, attack_target Server, severity Critical; \
+    gid:1; sid:9001021; rev:1; )
+
+# x64 shellcode with /bin/sh + syscall
+alert http ( \
+    msg:"PHP2SHELL - x64 shellcode pattern with /bin/sh in POST body"; \
+    flow:to_server,established; \
+    http_method; content:"POST"; \
+    http_client_body; content:"/bin/sh"; \
+    http_client_body; content:"|0F 05|"; distance:0; \
+    classtype:shellcode-detect; \
+    reference:cve,2026-109618; \
+    reference:cve,2026-109619; \
+    metadata:service http, attack_target Server, severity Critical; \
+    gid:1; sid:9001022; rev:1; )
+
+# Base64-encoded command execution payload
+alert http ( \
+    msg:"PHP2SHELL - Base64-encoded command execution in POST body"; \
+    flow:to_server,established; \
+    http_method; content:"POST"; \
+    http_client_body; content:"base64_decode"; nocase; \
+    pcre:"/(?:system|exec|passthru|shell_exec|popen|proc_open)\s*\(/i"; \
+    classtype:web-application-attack; \
+    reference:cve,2026-109618; \
+    reference:cve,2026-109619; \
+    metadata:service http, attack_target Server, severity High; \
+    gid:1; sid:9001023; rev:1; )
+
+# ---------------------------------------------------------------------------
+# 8. PHP-FPM Connection Exhaustion — Worker Monopolization
+# ---------------------------------------------------------------------------
+
+alert tcp ( \
+    msg:"PHP2SHELL - Excessive SYN to PHP-FPM port (worker monopolization)"; \
+    flow:to_server; \
+    flags:S; \
+    detection_filter:track by_src, count 50, seconds 5; \
+    classtype:attempted-dos; \
+    reference:cve,2026-109619; \
+    metadata:service php-fpm, attack_target Server, severity High; \
+    gid:1; sid:9001040; rev:1; )
+
+# =============================================================================
+# END OF RULESET
+# =============================================================================

@@ -1,0 +1,346 @@
+# =============================================================================
+# PHP2Shell Suricata Detection Rules
+# =============================================================================
+#
+# Purpose:  Detect exploitation attempts targeting CVE-2026-109618 (OOM →
+#           Uninitialized Memory Corruption) and CVE-2026-109619 (Use-After-
+#           Free via stale global state) in PHP request-handling code.
+#
+# Deploy:   Copy to /etc/suricata/rules/ and add:
+#             rule-files:
+#               - php2shell.rules
+#           Then reload: suricatasc -c reload-rules
+#
+# SID range: 9000001 – 9000099 (reserved for this ruleset)
+# Author:   PHP2Shell Research Project – Defensive Detection Team
+# Date:     2026-10-22
+# License:  BSD-3-Clause
+# =============================================================================
+
+
+# ---------------------------------------------------------------------------
+# 1. OOM-Triggering Requests — CVE-2026-109618
+#    Crafted requests with an abnormally large Content-Length header value
+#    designed to exhaust PHP worker memory during request body parsing.
+#    Threshold: Content-Length > 1 GB (1073741824 bytes) is suspicious for
+#    most web applications; tune to match your environment.
+# ---------------------------------------------------------------------------
+
+alert http $EXTERNAL_NET any -> $HTTP_SERVERS any ( \
+    msg:"PHP2SHELL CVE-2026-109618 - Oversized Content-Length (potential OOM trigger)"; \
+    flow:to_server,established; \
+    http.header; content:"Content-Length|3a|"; \
+    pcre:"/Content-Length\s*:\s*[1-9]\d{9,}/Hi"; \
+    classtype:web-application-attack; \
+    reference:cve,2026-109618; \
+    metadata:attack_target Server, created_at 2026_10_22, deployment Perimeter, \
+             severity High, confidence Medium, \
+             mitre_attack_tactic Initial_Access, \
+             mitre_attack_technique T1190; \
+    sid:9000001; rev:1; )
+
+# ---------------------------------------------------------------------------
+# 2. Deeply Nested Multipart Form Boundaries — CVE-2026-109618
+#    Attackers embed many nested multipart MIME boundaries to amplify memory
+#    allocation during PHP's request parsing.  Four or more boundary= tokens
+#    in a single Content-Type header is anomalous.
+# ---------------------------------------------------------------------------
+
+alert http $EXTERNAL_NET any -> $HTTP_SERVERS any ( \
+    msg:"PHP2SHELL CVE-2026-109618 - Deeply nested multipart boundaries (OOM amplification)"; \
+    flow:to_server,established; \
+    http.header; content:"multipart/form-data"; nocase; \
+    http.header; content:"boundary="; nocase; \
+    http.header; content:"boundary="; nocase; distance:1; \
+    http.header; content:"boundary="; nocase; distance:1; \
+    http.header; content:"boundary="; nocase; distance:1; \
+    classtype:web-application-attack; \
+    reference:cve,2026-109618; \
+    metadata:attack_target Server, created_at 2026_10_22, deployment Perimeter, \
+             severity High, confidence High, \
+             mitre_attack_tactic Initial_Access, \
+             mitre_attack_technique T1190; \
+    sid:9000002; rev:1; )
+
+# ---------------------------------------------------------------------------
+# 3. Memory Exhaustion Pattern in Request Body — CVE-2026-109618
+#    Large blocks of repeated padding bytes (0x41, 0x00, 0x90) inside a POST
+#    body aimed at exhausting the PHP memory_limit allocation.  We look for
+#    long runs (≥ 4096 bytes) of identical bytes.
+# ---------------------------------------------------------------------------
+
+alert http $EXTERNAL_NET any -> $HTTP_SERVERS any ( \
+    msg:"PHP2SHELL CVE-2026-109618 - Repeated padding in POST body (memory exhaustion)"; \
+    flow:to_server,established; \
+    http.method; content:"POST"; \
+    http.request_body; content:"|41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41|"; depth:4096; \
+    isdataat:4096,relative; \
+    classtype:web-application-attack; \
+    reference:cve,2026-109618; \
+    metadata:attack_target Server, created_at 2026_10_22, deployment Perimeter, \
+             severity Medium, confidence Medium, \
+             mitre_attack_tactic Initial_Access, \
+             mitre_attack_technique T1190; \
+    sid:9000003; rev:1; )
+
+# ---------------------------------------------------------------------------
+# 4. Rapid Sequential Requests — CVE-2026-109619 (Use-After-Free)
+#    The UAF requires the attacker to hit the SAME PHP-FPM worker twice in
+#    rapid succession: first to trigger the error that leaves a dangling
+#    pointer, then to exploit the stale memory.  We use threshold to detect
+#    ≥ 10 requests from one source to the same destination within 2 seconds.
+# ---------------------------------------------------------------------------
+
+alert http $EXTERNAL_NET any -> $HTTP_SERVERS any ( \
+    msg:"PHP2SHELL CVE-2026-109619 - Rapid sequential requests (UAF race condition)"; \
+    flow:to_server,established; \
+    http.method; content:"POST"; \
+    threshold:type both, track by_src, count 10, seconds 2; \
+    classtype:web-application-attack; \
+    reference:cve,2026-109619; \
+    metadata:attack_target Server, created_at 2026_10_22, deployment Perimeter, \
+             severity Critical, confidence Medium, \
+             mitre_attack_tactic Execution, \
+             mitre_attack_technique T1059; \
+    sid:9000004; rev:1; )
+
+# ---------------------------------------------------------------------------
+# 5. Known Exploit User-Agent Strings — PHP2Shell Tooling Signatures
+#    Public PoC tools and exploit frameworks use identifiable UA strings.
+#    These patterns are high-confidence but trivially spoofable; combine
+#    with other rules for stronger signal.
+# ---------------------------------------------------------------------------
+
+alert http $EXTERNAL_NET any -> $HTTP_SERVERS any ( \
+    msg:"PHP2SHELL - Known exploit tool User-Agent (php2shell)"; \
+    flow:to_server,established; \
+    http.user_agent; content:"php2shell"; nocase; \
+    classtype:trojan-activity; \
+    reference:cve,2026-109618; \
+    reference:cve,2026-109619; \
+    metadata:attack_target Server, created_at 2026_10_22, deployment Perimeter, \
+             severity High, confidence High, \
+             mitre_attack_tactic Initial_Access, \
+             mitre_attack_technique T1190; \
+    sid:9000005; rev:1; )
+
+alert http $EXTERNAL_NET any -> $HTTP_SERVERS any ( \
+    msg:"PHP2SHELL - Known exploit tool User-Agent (PHP-OOM-Exploit)"; \
+    flow:to_server,established; \
+    http.user_agent; content:"PHP-OOM-Exploit"; nocase; \
+    classtype:trojan-activity; \
+    reference:cve,2026-109618; \
+    metadata:attack_target Server, created_at 2026_10_22, deployment Perimeter, \
+             severity High, confidence High, \
+             mitre_attack_tactic Initial_Access, \
+             mitre_attack_technique T1190; \
+    sid:9000006; rev:1; )
+
+alert http $EXTERNAL_NET any -> $HTTP_SERVERS any ( \
+    msg:"PHP2SHELL - Known exploit tool User-Agent (UAF-Trigger)"; \
+    flow:to_server,established; \
+    http.user_agent; content:"UAF-Trigger"; nocase; \
+    classtype:trojan-activity; \
+    reference:cve,2026-109619; \
+    metadata:attack_target Server, created_at 2026_10_22, deployment Perimeter, \
+             severity High, confidence High, \
+             mitre_attack_tactic Execution, \
+             mitre_attack_technique T1059; \
+    sid:9000007; rev:1; )
+
+alert http $EXTERNAL_NET any -> $HTTP_SERVERS any ( \
+    msg:"PHP2SHELL - Known exploit tool User-Agent (PhpSploit)"; \
+    flow:to_server,established; \
+    http.user_agent; content:"PhpSploit"; nocase; \
+    classtype:trojan-activity; \
+    reference:cve,2026-109618; \
+    reference:cve,2026-109619; \
+    metadata:attack_target Server, created_at 2026_10_22, deployment Perimeter, \
+             severity High, confidence High, \
+             mitre_attack_tactic Initial_Access, \
+             mitre_attack_technique T1190; \
+    sid:9000008; rev:1; )
+
+# ---------------------------------------------------------------------------
+# 6. Abnormal PHP Error Responses — Exploitation Side-Effects
+#    When OOM or UAF corruption occurs, PHP often emits characteristic error
+#    messages in the HTTP response body.  Detecting these from your own
+#    servers indicates a worker has been partially corrupted.
+# ---------------------------------------------------------------------------
+
+alert http $HTTP_SERVERS any -> $EXTERNAL_NET any ( \
+    msg:"PHP2SHELL - PHP fatal error: Out of memory (possible OOM exploitation)"; \
+    flow:to_client,established; \
+    http.response_body; content:"Fatal error"; nocase; \
+    http.response_body; content:"Allowed memory size"; nocase; distance:0; \
+    classtype:web-application-activity; \
+    reference:cve,2026-109618; \
+    metadata:attack_target Server, created_at 2026_10_22, deployment Internal, \
+             severity High, confidence Medium, \
+             mitre_attack_tactic Impact, \
+             mitre_attack_technique T1499; \
+    sid:9000010; rev:1; )
+
+alert http $HTTP_SERVERS any -> $HTTP_SERVERS any ( \
+    msg:"PHP2SHELL - PHP segfault indicator in error response (possible UAF)"; \
+    flow:to_client,established; \
+    http.stat_code; content:"500"; \
+    http.response_body; content:"Segmentation fault"; nocase; \
+    classtype:web-application-activity; \
+    reference:cve,2026-109619; \
+    metadata:attack_target Server, created_at 2026_10_22, deployment Internal, \
+             severity Critical, confidence High, \
+             mitre_attack_tactic Execution, \
+             mitre_attack_technique T1059; \
+    sid:9000011; rev:1; )
+
+alert http $HTTP_SERVERS any -> $EXTERNAL_NET any ( \
+    msg:"PHP2SHELL - PHP zend_mm_heap corrupted error (UAF/heap corruption)"; \
+    flow:to_client,established; \
+    http.response_body; content:"zend_mm_heap corrupted"; nocase; \
+    classtype:web-application-activity; \
+    reference:cve,2026-109619; \
+    metadata:attack_target Server, created_at 2026_10_22, deployment Internal, \
+             severity Critical, confidence High, \
+             mitre_attack_tactic Execution, \
+             mitre_attack_technique T1059; \
+    sid:9000012; rev:1; )
+
+alert http $HTTP_SERVERS any -> $EXTERNAL_NET any ( \
+    msg:"PHP2SHELL - PHP double free or corruption error"; \
+    flow:to_client,established; \
+    http.response_body; content:"double free or corruption"; nocase; \
+    classtype:web-application-activity; \
+    reference:cve,2026-109619; \
+    metadata:attack_target Server, created_at 2026_10_22, deployment Internal, \
+             severity Critical, confidence High, \
+             mitre_attack_tactic Execution, \
+             mitre_attack_technique T1059; \
+    sid:9000013; rev:1; )
+
+# ---------------------------------------------------------------------------
+# 7. Shellcode-Like Patterns in PHP Request Bodies
+#    Detect NOP sleds, common x86/x64 shellcode prologues, and suspicious
+#    binary content inside POST bodies destined for PHP endpoints.
+# ---------------------------------------------------------------------------
+
+# NOP sled (≥ 32 consecutive 0x90 bytes)
+alert http $EXTERNAL_NET any -> $HTTP_SERVERS any ( \
+    msg:"PHP2SHELL - NOP sled in POST body (shellcode injection attempt)"; \
+    flow:to_server,established; \
+    http.method; content:"POST"; \
+    http.request_body; content:"|90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90|"; \
+    classtype:shellcode-detect; \
+    reference:cve,2026-109618; \
+    reference:cve,2026-109619; \
+    metadata:attack_target Server, created_at 2026_10_22, deployment Perimeter, \
+             severity Critical, confidence High, \
+             mitre_attack_tactic Execution, \
+             mitre_attack_technique T1059; \
+    sid:9000020; rev:1; )
+
+# x86 shellcode prologue: push ebp; mov ebp,esp  (0x55 0x89 0xE5)
+alert http $EXTERNAL_NET any -> $HTTP_SERVERS any ( \
+    msg:"PHP2SHELL - x86 shellcode prologue in POST body"; \
+    flow:to_server,established; \
+    http.method; content:"POST"; \
+    http.request_body; content:"|55 89 E5|"; \
+    http.request_body; content:"|CD 80|"; distance:0; \
+    classtype:shellcode-detect; \
+    reference:cve,2026-109618; \
+    reference:cve,2026-109619; \
+    metadata:attack_target Server, created_at 2026_10_22, deployment Perimeter, \
+             severity Critical, confidence High, \
+             mitre_attack_tactic Execution, \
+             mitre_attack_technique T1059; \
+    sid:9000021; rev:1; )
+
+# x64 shellcode: syscall instruction (0x0F 0x05) with preceding /bin/sh string
+alert http $EXTERNAL_NET any -> $HTTP_SERVERS any ( \
+    msg:"PHP2SHELL - x64 shellcode pattern with /bin/sh in POST body"; \
+    flow:to_server,established; \
+    http.method; content:"POST"; \
+    http.request_body; content:"/bin/sh"; \
+    http.request_body; content:"|0F 05|"; distance:0; \
+    classtype:shellcode-detect; \
+    reference:cve,2026-109618; \
+    reference:cve,2026-109619; \
+    metadata:attack_target Server, created_at 2026_10_22, deployment Perimeter, \
+             severity Critical, confidence High, \
+             mitre_attack_tactic Execution, \
+             mitre_attack_technique T1059; \
+    sid:9000022; rev:1; )
+
+# Encoded shellcode via common PHP exploitation payloads (base64-encoded exec calls)
+alert http $EXTERNAL_NET any -> $HTTP_SERVERS any ( \
+    msg:"PHP2SHELL - Base64-encoded system() call in POST body"; \
+    flow:to_server,established; \
+    http.method; content:"POST"; \
+    http.request_body; content:"base64_decode"; nocase; \
+    http.request_body; pcre:"/(?:system|exec|passthru|shell_exec|popen|proc_open)\s*\(/i"; \
+    classtype:web-application-attack; \
+    reference:cve,2026-109618; \
+    reference:cve,2026-109619; \
+    metadata:attack_target Server, created_at 2026_10_22, deployment Perimeter, \
+             severity High, confidence Medium, \
+             mitre_attack_tactic Execution, \
+             mitre_attack_technique T1059_004; \
+    sid:9000023; rev:1; )
+
+# ---------------------------------------------------------------------------
+# 8. Combined Indicator — OOM trigger followed by rapid retry
+#    Flowbit-based chaining: first rule sets a flowbit on a suspicious large
+#    POST; second rule fires only if a subsequent request arrives on the same
+#    flow within the timeout window.
+# ---------------------------------------------------------------------------
+
+alert http $EXTERNAL_NET any -> $HTTP_SERVERS any ( \
+    msg:"PHP2SHELL - Stage 1: Large POST body (potential OOM setup)"; \
+    flow:to_server,established; \
+    http.method; content:"POST"; \
+    http.header; content:"Content-Length|3a|"; \
+    pcre:"/Content-Length\s*:\s*[1-9]\d{7,}/Hi"; \
+    flowbits:set,php2shell.oom_attempt; \
+    flowbits:noalert; \
+    classtype:web-application-attack; \
+    reference:cve,2026-109618; \
+    metadata:attack_target Server, created_at 2026_10_22, deployment Perimeter, \
+             severity Low, confidence Low; \
+    sid:9000030; rev:1; )
+
+alert http $EXTERNAL_NET any -> $HTTP_SERVERS any ( \
+    msg:"PHP2SHELL - Stage 2: Follow-up request after OOM attempt (UAF chain)"; \
+    flow:to_server,established; \
+    http.method; content:"POST"; \
+    flowbits:isset,php2shell.oom_attempt; \
+    classtype:web-application-attack; \
+    reference:cve,2026-109618; \
+    reference:cve,2026-109619; \
+    metadata:attack_target Server, created_at 2026_10_22, deployment Perimeter, \
+             severity Critical, confidence High, \
+             mitre_attack_tactic Execution, \
+             mitre_attack_technique T1059; \
+    sid:9000031; rev:1; )
+
+# ---------------------------------------------------------------------------
+# 9. PHP-FPM Connection Exhaustion — Pre-condition Indicator
+#    Many connections to the FastCGI port (typically 9000) from a single
+#    source may indicate an attempt to monopolize PHP workers for the UAF.
+# ---------------------------------------------------------------------------
+
+alert tcp $EXTERNAL_NET any -> $HTTP_SERVERS 9000 ( \
+    msg:"PHP2SHELL - Excessive connections to PHP-FPM port (worker monopolization)"; \
+    flow:to_server; \
+    flags:S; \
+    threshold:type both, track by_src, count 50, seconds 5; \
+    classtype:attempted-dos; \
+    reference:cve,2026-109619; \
+    metadata:attack_target Server, created_at 2026_10_22, deployment Internal, \
+             severity High, confidence Medium, \
+             mitre_attack_tactic Impact, \
+             mitre_attack_technique T1499_002; \
+    sid:9000040; rev:1; )
+
+# =============================================================================
+# END OF RULESET
+# =============================================================================

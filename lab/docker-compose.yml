@@ -1,0 +1,157 @@
+# =============================================================================
+# PHP2Shell Research Lab — Docker Compose Configuration
+# =============================================================================
+#
+# This Docker Compose file sets up a controlled lab environment with multiple
+# PHP versions for testing the PHP2Shell vulnerability scanner.
+#
+# VULNERABLE versions:  PHP 8.2.34, 8.3.35, 8.4.26, 8.5.11
+# PATCHED version:      PHP 8.3.36
+#
+# All services are bound to 127.0.0.1 only — NOT accessible externally.
+# An isolated Docker network prevents cross-contamination with other containers.
+#
+# Usage:
+#   docker compose up -d          # Start all services
+#   docker compose ps             # Check status
+#   docker compose down -v        # Tear down and clean up
+#
+# WARNING: This environment runs INTENTIONALLY VULNERABLE software.
+#          Use only in isolated research environments. See LAB_SETUP.md.
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # VULNERABLE — PHP 8.2.34
+  # ---------------------------------------------------------------------------
+  # Affected by both CVE-2026-109618 (OOM memory corruption) and
+  # CVE-2026-109619 (stale global state use-after-free).
+  # Fixed in PHP 8.2.35.
+  php82-vuln:
+    image: php:8.2.34-apache
+    container_name: php82-vuln
+    hostname: php82-vuln
+    ports:
+      - "127.0.0.1:8082:80"        # Bind to localhost ONLY
+    volumes:
+      - ./app:/var/www/html:ro      # Mount test app as read-only
+    environment:
+      - PHP_INI_MEMORY_LIMIT=64M    # Low memory limit to demonstrate OOM behavior
+    restart: "no"                    # Do not auto-restart — lab use only
+    networks:
+      - php2shell-lab-net
+    labels:
+      - "php2shell.role=vulnerable"
+      - "php2shell.version=8.2.34"
+      - "php2shell.cve=CVE-2026-109618,CVE-2026-109619"
+
+  # ---------------------------------------------------------------------------
+  # VULNERABLE — PHP 8.3.35
+  # ---------------------------------------------------------------------------
+  # Affected by both CVE-2026-109618 and CVE-2026-109619.
+  # Fixed in PHP 8.3.36.
+  php83-vuln:
+    image: php:8.3.35-apache
+    container_name: php83-vuln
+    hostname: php83-vuln
+    ports:
+      - "127.0.0.1:8083:80"        # Bind to localhost ONLY
+    volumes:
+      - ./app:/var/www/html:ro      # Mount test app as read-only
+    environment:
+      - PHP_INI_MEMORY_LIMIT=64M
+    restart: "no"
+    networks:
+      - php2shell-lab-net
+    labels:
+      - "php2shell.role=vulnerable"
+      - "php2shell.version=8.3.35"
+      - "php2shell.cve=CVE-2026-109618,CVE-2026-109619"
+
+  # ---------------------------------------------------------------------------
+  # VULNERABLE — PHP 8.4.26
+  # ---------------------------------------------------------------------------
+  # Affected by both CVE-2026-109618 and CVE-2026-109619.
+  # Fixed in PHP 8.4.27.
+  php84-vuln:
+    image: php:8.4.26-apache
+    container_name: php84-vuln
+    hostname: php84-vuln
+    ports:
+      - "127.0.0.1:8084:80"        # Bind to localhost ONLY
+    volumes:
+      - ./app:/var/www/html:ro      # Mount test app as read-only
+    environment:
+      - PHP_INI_MEMORY_LIMIT=64M
+    restart: "no"
+    networks:
+      - php2shell-lab-net
+    labels:
+      - "php2shell.role=vulnerable"
+      - "php2shell.version=8.4.26"
+      - "php2shell.cve=CVE-2026-109618,CVE-2026-109619"
+
+  # ---------------------------------------------------------------------------
+  # VULNERABLE — PHP 8.5.11
+  # ---------------------------------------------------------------------------
+  # Affected by both CVE-2026-109618 and CVE-2026-109619.
+  # Fixed in PHP 8.5.12.
+  php85-vuln:
+    image: php:8.5.11-apache
+    container_name: php85-vuln
+    hostname: php85-vuln
+    ports:
+      - "127.0.0.1:8085:80"        # Bind to localhost ONLY
+    volumes:
+      - ./app:/var/www/html:ro      # Mount test app as read-only
+    environment:
+      - PHP_INI_MEMORY_LIMIT=64M
+    restart: "no"
+    networks:
+      - php2shell-lab-net
+    labels:
+      - "php2shell.role=vulnerable"
+      - "php2shell.version=8.5.11"
+      - "php2shell.cve=CVE-2026-109618,CVE-2026-109619"
+
+  # ---------------------------------------------------------------------------
+  # PATCHED — PHP 8.3.36
+  # ---------------------------------------------------------------------------
+  # This service runs the PATCHED version of PHP 8.3.
+  # Use it as a control/baseline to verify the scanner correctly identifies
+  # non-vulnerable targets. Both CVE-2026-109618 and CVE-2026-109619 are fixed.
+  php83-patched:
+    image: php:8.3.36-apache
+    container_name: php83-patched
+    hostname: php83-patched
+    ports:
+      - "127.0.0.1:8086:80"        # Bind to localhost ONLY
+    volumes:
+      - ./app:/var/www/html:ro      # Mount test app as read-only
+    environment:
+      - PHP_INI_MEMORY_LIMIT=128M
+    restart: "no"
+    networks:
+      - php2shell-lab-net
+    labels:
+      - "php2shell.role=patched"
+      - "php2shell.version=8.3.36"
+      - "php2shell.cve=none"
+
+# =============================================================================
+# Network Configuration
+# =============================================================================
+# Isolated bridge network for the lab. No external connectivity.
+# All inter-container communication is restricted to this network.
+networks:
+  php2shell-lab-net:
+    name: php2shell-lab-net
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16    # Dedicated subnet for isolation
+    internal: false                  # Set to true to fully block internet access
+    labels:
+      - "php2shell.purpose=research-lab"
+      - "php2shell.warning=contains-vulnerable-software"

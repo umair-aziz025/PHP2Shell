@@ -1,0 +1,18 @@
+# PHP2Shell Research Toolkit — Python Dependencies
+# ================================================
+#
+# Install with:  pip install -r requirements.txt
+
+requests>=2.28.0
+colorama>=0.4.6
+
+# The following are part of the Python standard library (>= 3.9) and do
+# NOT need to be installed separately.  They are listed here for
+# documentation purposes only.
+#
+# ipaddress          — IP / CIDR parsing  (stdlib)
+# concurrent.futures — Thread pool        (stdlib)
+# dataclasses        — Data classes       (stdlib)
+# argparse           — CLI parsing        (stdlib)
+# json               — JSON I/O           (stdlib)
+# logging            — Structured logging (stdlib)
