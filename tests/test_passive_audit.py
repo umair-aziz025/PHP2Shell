@@ -4,6 +4,7 @@ Run: python -m unittest discover -s tests -v
 These tests do not open sockets or send exploit traffic.
 """
 import io
+import json
 import unittest
 from contextlib import redirect_stdout
 from unittest import mock
@@ -93,6 +94,19 @@ class PassiveAuditTests(unittest.TestCase):
               redirect_stdout(io.StringIO())):
             self.assertEqual(tool.main(), 0)
             exploit.assert_not_called()
+
+    def test_json_stdout_is_valid_json(self):
+        output = io.StringIO()
+        with (mock.patch.object(tool, "load_custom_wordlist", return_value=[]),
+              mock.patch.object(tool.UnifiedPHP2Shell, "run_passive",
+                                return_value=(tool.VersionResult(), tool.HeaderAnalysis())),
+              mock.patch("sys.argv", ["php2shell", "http://127.0.0.1:8899/", "--json"]),
+              redirect_stdout(output)):
+            self.assertEqual(tool.main(), 0)
+        data = json.loads(output.getvalue())
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["target"], "http://127.0.0.1:8899/")
+
 
 
 if __name__ == "__main__":
